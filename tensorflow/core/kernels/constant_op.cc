@@ -71,8 +71,10 @@ ConstantOp::ConstantOp(OpKernelConstruction* ctx)
       tensor_(ctx->output_type(0)) {
   const TensorProto* proto = nullptr;
   OP_REQUIRES_OK(ctx, ctx->GetAttr("value", &proto));
+  ctx->device()->GetAllocator(AllocatorAttributes())->SetOperationInfo(ctx->def().name(), ctx->def().op());
   OP_REQUIRES_OK(ctx, ctx->device()->MakeTensorFromProto(
                           *proto, AllocatorAttributes(), &tensor_));
+  ctx->device()->GetAllocator(AllocatorAttributes())->ResetOperationInfo();
   OP_REQUIRES(
       ctx, ctx->output_type(0) == tensor_.dtype(),
       errors::InvalidArgument("Type mismatch between value (",

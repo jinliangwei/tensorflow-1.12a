@@ -536,6 +536,7 @@ def tf_additional_proto_hdrs():
         "platform/default/integral_types.h",
         "platform/default/logging.h",
         "platform/default/protobuf.h",
+	"platform/default/mem_logger.h",
     ] + if_windows([
         "platform/windows/integral_types.h",
     ])

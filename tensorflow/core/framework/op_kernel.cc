@@ -703,7 +703,11 @@ Status OpKernelContext::allocate_output(int index, const TensorShape& shape,
   DCHECK(!IsRefType(type));
   DCHECK(mutable_output(index) == nullptr);
   Tensor* output_tensor = new Tensor();
+  get_allocator(attr)->SetOperationInfo(params_->op_kernel->name(), params_->op_kernel->type_string());
+  get_allocator(attr)->SetAllocationInfo(internal::MemLogger::AllocType::kOutput);
   Status s = allocate_tensor(type, shape, output_tensor, attr);
+  get_allocator(attr)->ResetOperationInfo();
+  get_allocator(attr)->ResetAllocationInfo();
   if (s.ok()) {
     outputs_[index] = TensorValue(output_tensor);
     *output = outputs_[index].tensor;
@@ -715,8 +719,12 @@ Status OpKernelContext::allocate_temp(
     DataType type, const TensorShape& shape, Tensor* out_temp,
     AllocatorAttributes allocator_attr,
     const AllocationAttributes& allocation_attr) {
+  get_allocator(allocator_attr)->SetOperationInfo(params_->op_kernel->name(), params_->op_kernel->type_string());
+  get_allocator(allocator_attr)->SetAllocationInfo(internal::MemLogger::AllocType::kTemporary);
   Status s =
       allocate_tensor(type, shape, out_temp, allocator_attr, allocation_attr);
+  get_allocator(allocator_attr)->ResetOperationInfo();
+  get_allocator(allocator_attr)->ResetAllocationInfo();
   if (track_allocations() && s.ok() && out_temp->TotalBytes() > 0) {
     Allocator* a = get_allocator(allocator_attr);
     if (a->TracksAllocationSizes()) {
@@ -733,7 +741,11 @@ Status OpKernelContext::allocate_persistent(DataType type,
                                             Tensor** out_tensor,
                                             AllocatorAttributes attr) {
   Tensor persistent;
+  get_allocator(attr)->SetOperationInfo(params_->op_kernel->name(), params_->op_kernel->type_string());
+  get_allocator(attr)->SetAllocationInfo(internal::MemLogger::AllocType::kPersistent);
   Status s = allocate_tensor(type, shape, &persistent, attr);
+  get_allocator(attr)->ResetOperationInfo();
+  get_allocator(attr)->ResetAllocationInfo();
   if (s.ok()) {
     *out_persistent = PersistentTensor(persistent);
     if (out_tensor) {

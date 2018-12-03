@@ -31,6 +31,7 @@ limitations under the License.
 #include "tensorflow/core/platform/thread_annotations.h"
 #include "tensorflow/core/platform/types.h"
 #include "tensorflow/core/protobuf/config.pb.h"
+#include "tensorflow/core/platform/default/mem_logger.h"
 
 namespace tensorflow {
 
@@ -54,6 +55,13 @@ class BFCAllocator : public Allocator {
   void* AllocateRaw(size_t alignment, size_t num_bytes,
                     const AllocationAttributes& allocation_attr) override;
   void DeallocateRaw(void* ptr) override;
+
+  virtual void LogSessionRunStart(int64_t time_stamp, int64_t step_id) const override;
+  virtual void LogSessionRunEnd(int64_t time_stamp, int64_t step_id) const override;
+  virtual void SetOperationInfo(const std::string &op_name, const std::string &op_type) const override;
+  virtual void ResetOperationInfo() const override;
+  virtual void SetAllocationInfo(internal::MemLogger::AllocType alloc_type) const override;
+  virtual void ResetAllocationInfo() const override;
 
   bool TracksAllocationSizes() override;
 
@@ -436,6 +444,7 @@ class BFCAllocator : public Allocator {
 
   // Stats.
   AllocatorStats stats_ GUARDED_BY(lock_);
+  mutable std::unique_ptr<internal::MemLogger> logger_;
 
   friend class GPUBFCAllocatorPrivateMethodsTest;
   TF_DISALLOW_COPY_AND_ASSIGN(BFCAllocator);

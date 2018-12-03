@@ -115,7 +115,12 @@ class EigenCudaStreamDevice : public ::Eigen::StreamInterface {
   }
 
   void* allocate(size_t num_bytes) const override {
+    allocator_->SetAllocationInfo(internal::MemLogger::AllocType::kTemporary);
+    allocator_->SetOperationInfo(context_->op_kernel().name(),
+                                context_->op_kernel().type_string());
     void* ret = allocator_->AllocateRaw(32 /* alignment */, num_bytes);
+    allocator_->ResetAllocationInfo();
+    allocator_->ResetOperationInfo();
     if (ret == nullptr) {
       if (context_) {
         context_->SetStatus(errors::ResourceExhausted(
@@ -584,8 +589,10 @@ Status BaseGPUDevice::MaybeCopyTensorToGPU(
       done(err);
       return err;
     }
+    GetAllocator(alloc_attrs)->SetAllocationInfo(internal::MemLogger::AllocType::kCopy);
     auto* copy =
         new Tensor(GetAllocator(alloc_attrs), from.dtype(), from.shape());
+    GetAllocator(alloc_attrs)->ResetAllocationInfo();
 
     // If the tensor is not initialized, we likely ran out of memory.
     if (!copy->IsInitialized()) {

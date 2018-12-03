@@ -239,6 +239,9 @@ class DeviceBase {
     return errors::Internal("Device does not implement MakeTensorFromProto()");
   }
 
+  virtual void LogSessionRunStart(int64_t time_stamp, int64_t step_id) const { }
+  virtual void LogSessionRunEnd(int64_t time_stamp, int64_t step_id) const { }
+
  protected:
   // Does not take ownership.
   void set_tensorflow_device_thread_pool(thread::ThreadPool* thread_pool) {

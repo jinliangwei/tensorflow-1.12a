@@ -26,6 +26,7 @@ limitations under the License.
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/platform/mutex.h"
 #include "tensorflow/core/platform/types.h"
+#include "tensorflow/core/platform/default/mem_logger.h"
 
 namespace tensorflow {
 
@@ -97,6 +98,13 @@ class Allocator {
   // Deallocate a block of memory pointer to by "ptr"
   // REQUIRES: "ptr" was previously returned by a call to AllocateRaw
   virtual void DeallocateRaw(void* ptr) = 0;
+
+  virtual void LogSessionRunStart(int64_t time_stamp, int64_t step_id) const { }
+  virtual void LogSessionRunEnd(int64_t time_stamp, int64_t step_id) const { }
+  virtual void SetOperationInfo(const std::string &op_name, const std::string &op_type) const { }
+  virtual void ResetOperationInfo() const { }
+  virtual void SetAllocationInfo(internal::MemLogger::AllocType alloc_type) const { }
+  virtual void ResetAllocationInfo() const { }
 
   // Convenience functions to do typed allocation.  C++ constructors
   // and destructors are invoked for complex types if necessary,

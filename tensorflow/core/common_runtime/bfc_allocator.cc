@@ -65,6 +65,17 @@ BFCAllocator::BFCAllocator(SubAllocator* sub_allocator, size_t total_memory,
       CHECK_NE(BinForSize(bin_size * 2), BinFromIndex(b));
     }
   }
+
+  char *log_path_prefix = std::getenv("TF_MEM_LOGGER_PATH_PREFIX");
+  if (log_path_prefix != nullptr) {
+    char *log_to_stderr_str = std::getenv("TF_MEM_LOGGER_ALSO_LOG_TO_STDERR");
+    bool log_to_stderr = log_to_stderr_str != nullptr && (
+        strcmp(log_to_stderr_str, "True") == 0 ||
+        strcmp(log_to_stderr_str, "true") == 0 ||
+        strcmp(log_to_stderr_str, "1") == 0);
+    logger_.reset(new internal::MemLogger(log_path_prefix, log_to_stderr,
+                                          name));
+  }
 }
 
 BFCAllocator::~BFCAllocator() {
@@ -311,6 +322,14 @@ void* BFCAllocator::FindChunkPtr(BinNum bin_num, size_t rounded_bytes,
         // Update stats.
         ++stats_.num_allocs;
         stats_.bytes_in_use += chunk->size;
+
+        if (logger_) {
+          logger_->LogAlloc(reinterpret_cast<uintptr_t>(chunk->ptr),
+                            chunk->size,
+                            stats_.bytes_in_use,
+                            Env::Default()->NowMicros());
+        }
+
         stats_.max_bytes_in_use =
             std::max(stats_.max_bytes_in_use, stats_.bytes_in_use);
         stats_.max_alloc_size =
@@ -384,6 +403,43 @@ void BFCAllocator::DeallocateRawInternal(void* ptr) {
 
   if (VLOG_IS_ON(4)) {
     LOG(INFO) << "F: " << RenderOccupancy();
+  }
+}
+
+void BFCAllocator::LogSessionRunStart(int64_t time_stamp, int64_t step_id) const {
+  if (logger_) {
+    logger_->LogSessionRunStart(time_stamp, step_id);
+  }
+}
+
+void BFCAllocator::LogSessionRunEnd(int64_t time_stamp, int64_t step_id) const {
+  if (logger_) {
+    logger_->LogSessionRunEnd(time_stamp, step_id);
+  }
+}
+
+void BFCAllocator::SetAllocationInfo(internal::MemLogger::AllocType alloc_type) const {
+  if (logger_) {
+    logger_->SetAllocationInfo(alloc_type);
+  }
+}
+
+void BFCAllocator::ResetAllocationInfo() const {
+  if (logger_) {
+    logger_->ResetAllocationInfo();
+  }
+}
+
+void BFCAllocator::SetOperationInfo(const std::string &op_name,
+                                    const std::string &op_type) const {
+  if (logger_) {
+    logger_->SetOperationInfo(op_name, op_type);
+  }
+}
+
+void BFCAllocator::ResetOperationInfo() const {
+  if (logger_) {
+    logger_->ResetOperationInfo();
   }
 }
 
@@ -462,6 +518,13 @@ void BFCAllocator::FreeAndMaybeCoalesce(BFCAllocator::ChunkHandle h) {
 
   // Updates the stats.
   stats_.bytes_in_use -= c->size;
+
+  if (logger_) {
+    logger_->LogDealloc(reinterpret_cast<uintptr_t>(c->ptr),
+                        c->size,
+                        stats_.bytes_in_use,
+                        Env::Default()->NowMicros());
+  }
 
   ChunkHandle coalesced_chunk = h;
 

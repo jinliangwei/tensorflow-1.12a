@@ -69,6 +69,11 @@ class TrackingAllocator : public Allocator {
   void GetStats(AllocatorStats* stats) override;
   void ClearStats() override;
 
+  void SetOperationInfo(const std::string &op_name, const std::string &op_type) const override;
+  void ResetOperationInfo() const override;
+  void SetAllocationInfo(internal::MemLogger::AllocType alloc_type) const override;
+  void ResetAllocationInfo() const override;
+
   // If the underlying allocator tracks allocation sizes, this returns
   // a tuple where the first value is the total number of bytes
   // allocated through this wrapper, the second value is the high

@@ -158,6 +158,22 @@ void TrackingAllocator::GetStats(AllocatorStats* stats) {
 
 void TrackingAllocator::ClearStats() { allocator_->ClearStats(); }
 
+void TrackingAllocator::SetOperationInfo(const std::string &op_name, const std::string &op_type) const {
+  allocator_->SetOperationInfo(op_name, op_type);
+}
+
+void TrackingAllocator::ResetOperationInfo() const {
+  allocator_->ResetOperationInfo();
+}
+
+void TrackingAllocator::SetAllocationInfo(internal::MemLogger::AllocType alloc_type) const {
+  allocator_->SetAllocationInfo(alloc_type);
+}
+
+void TrackingAllocator::ResetAllocationInfo() const {
+  allocator_->ResetAllocationInfo();
+}
+
 std::tuple<size_t, size_t, size_t> TrackingAllocator::GetSizes() {
   size_t high_watermark;
   size_t total_bytes;

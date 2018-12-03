@@ -769,8 +769,18 @@ Status DirectSession::Run(const RunOptions& run_options,
     LogMemory::RecordStep(step_id, run_state_args.handle);
   }
 
+  for (auto device : devices_) {
+    device->LogSessionRunStart(Env::Default()->NowMicros(),
+                               step_id);
+  }
+
   TF_RETURN_IF_ERROR(RunInternal(step_id, run_options, &call_frame,
                                  executors_and_keys, run_metadata));
+
+  for (auto device : devices_) {
+    device->LogSessionRunEnd(Env::Default()->NowMicros(),
+                             step_id);
+  }
 
   // Receive outputs.
   if (outputs) {
@@ -1811,10 +1821,19 @@ class DirectSession::RunCallableCallFrame : public CallFrameInterface {
     LogMemory::RecordStep(step_id, run_state_args.handle);
   }
 
+  for (auto device : devices_) {
+    device->LogSessionRunStart(Env::Default()->NowMicros(),
+                               step_id);
+  }
+
   TF_RETURN_IF_ERROR(
       RunInternal(step_id, executors_and_keys->callable_options.run_options(),
                   &call_frame, executors_and_keys.get(), run_metadata));
 
+  for (auto device : devices_) {
+    device->LogSessionRunEnd(Env::Default()->NowMicros(),
+                             step_id);
+  }
   return Status::OK();
 }
 

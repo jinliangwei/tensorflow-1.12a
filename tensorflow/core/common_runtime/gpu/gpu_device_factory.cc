@@ -53,6 +53,20 @@ class GPUDevice : public BaseGPUDevice {
     }
   }
 
+  virtual void LogSessionRunStart(int64_t time_stamp, int64_t step_id) const override {
+    GPUProcessState* ps = GPUProcessState::singleton();
+    ps->GetCUDAHostAllocator(0)->LogSessionRunStart(time_stamp, step_id);
+    cpu_allocator_->LogSessionRunStart(time_stamp, step_id);
+    gpu_allocator_->LogSessionRunStart(time_stamp, step_id);
+  }
+
+  virtual void LogSessionRunEnd(int64_t time_stamp, int64_t step_id) const override {
+    GPUProcessState* ps = GPUProcessState::singleton();
+    ps->GetCUDAHostAllocator(0)->LogSessionRunEnd(time_stamp, step_id);
+    cpu_allocator_->LogSessionRunEnd(time_stamp, step_id);
+    gpu_allocator_->LogSessionRunEnd(time_stamp, step_id);
+  }
+
  private:
   bool force_gpu_compatible_ = false;
 };

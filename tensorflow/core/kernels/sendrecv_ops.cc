@@ -162,6 +162,7 @@ Rendezvous::DoneCallback make_recv_callback(OpKernelContext* ctx,
           }
         }
         done();
+        ctx->device()->GetAllocator(recv_args.alloc_attrs)->ResetOperationInfo();
       },
       std::move(done), _1, _2, _3, _4, _5);
 }
