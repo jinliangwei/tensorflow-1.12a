@@ -1128,6 +1128,9 @@ static TF_OperationDescription* TF_NewOperationLocked(TF_Graph* graph,
 TF_OperationDescription* TF_NewOperation(TF_Graph* graph, const char* op_type,
                                          const char* oper_name) {
   mutex_lock l(graph->mu);
+  LOG(INFO) << __func__ << " graph = " << (void*) graph
+            << " op_type = " << op_type
+            << " op_name = " << oper_name;
   return TF_NewOperationLocked(graph, op_type, oper_name);
 }
 

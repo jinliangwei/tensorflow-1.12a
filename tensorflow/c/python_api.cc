@@ -43,6 +43,9 @@ void SetAttr(TF_Graph* graph, TF_Operation* op, const char* attr_name,
 
 void SetRequestedDevice(TF_Graph* graph, TF_Operation* op, const char* device) {
   mutex_lock l(graph->mu);
+  LOG(INFO) << __func__ << " device = " << device
+            << " for operation = " << op->node.name()
+            << " op_type = " << op->node.type_string();
   op->node.set_requested_device(device);
   RecordMutation(graph, *op, "setting device");
 }

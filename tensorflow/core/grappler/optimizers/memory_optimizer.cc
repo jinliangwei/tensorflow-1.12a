@@ -722,7 +722,6 @@ Status BuildSwapPair(NodeDef* node, int input_to_swap,
   NodeDef* swap_out_node = graph->add_node();
   swap_out_node->set_name(swap_out_name);
   swap_out_node->set_op("_CopyFromGpuToHost");
-
   // Force the tensor to be restored to the device.
   NodeDef* swap_in_node = graph->add_node();
   swap_in_node->set_name(swap_in_name);
@@ -731,6 +730,7 @@ Status BuildSwapPair(NodeDef* node, int input_to_swap,
 
   // Colocate the swap_out_ and swap_in_ nodes with the node itself.
   swap_out_node->set_device(node->device());
+  //LOG(INFO) << __func__ << " swap_out, swap_in device = " << node->device();
   swap_in_node->set_device(node->device());
   string coloc_group = strings::StrCat("loc@", tensor_to_swap);
   (*swap_out_node->mutable_attr())["_class"].mutable_list()->add_s(coloc_group);
@@ -958,6 +958,8 @@ static bool IdentifySwappingCandidates(
   for (const auto& device : devices) {
     const string& name = device.first;
     const DeviceProperties& prop = device.second;
+    //LOG(INFO) << __func__ << " name = " << name
+    //          << " prop.type() = " << prop.type();
     if (prop.type() != "GPU") {
       continue;
     }
@@ -965,7 +967,11 @@ static bool IdentifySwappingCandidates(
       VLOG(1) << "Peak memory usage unknown for device " << name;
       continue;
     }
+    //LOG(INFO) << __func__ << " device.name = " << name
+    //          << " device.type = " << prop.type();
     const GraphMemory::MemoryUsage& mem_usage = memory.GetPeakMemoryUsage(name);
+    //LOG(INFO) << __func__ << " device.name = " << name
+    //          << " peak_memory_usage = " << mem_usage.used_memory;
 
     if (mem_usage.used_memory <= prop.memory_size()) {
       continue;
@@ -988,11 +994,14 @@ static bool IdentifySwappingCandidates(
       }
 
       for (const auto& dev_stats : metadata.step_stats().dev_stats()) {
+        //LOG(INFO) << __func__ << " device_stats.devce = " << dev_stats.device();
         for (const auto& node_stats : dev_stats.node_stats()) {
           Costs::NanoSeconds exec_time =
               Costs::NanoSeconds(1) +
               Costs::MicroSeconds(node_stats.all_start_micros() +
                                   node_stats.op_end_rel_micros());
+          //LOG(INFO) << __func__ << " node = " << node_stats.node_name()
+          //          << " exec_time = " << exec_time;
           op_completion_times.emplace(node_stats.node_name(), exec_time);
         }
       }
@@ -1045,6 +1054,14 @@ static bool IdentifySwappingCandidates(
           continue;
         }
 
+        auto* node = input.node;
+        auto device = node->device();
+        auto device_iter = devices.find(device);
+        if (device_iter == devices.end() ||
+            device_iter->second.type() != "GPU") {
+          continue;
+        }
+
         if (skip_list->find(input.node->name()) != skip_list->end()) {
           valid = false;
           break;
@@ -1064,6 +1081,7 @@ static bool IdentifySwappingCandidates(
         mem_info.uses_left.emplace_back(input);
         earliest_use = std::min(earliest_use, it->second);
       }
+
       if (valid && !mem_info.uses_left.empty()) {
         // Compute the fitness: we need the tensor to be generated way away of
         // the time of peak memory usage (to ensure there is enough time to swap
@@ -1093,12 +1111,20 @@ static bool IdentifySwappingCandidates(
                 << mem_info.port.node->name() << ":" << mem_info.port.port_id
                 << " of size " << mem_info.memory_used;
 
+        //LOG(INFO) << "Will swap fanout " << fanout_to_swap.node->name() << ":"
+        //          << fanout_to_swap.port_id << " of tensor "
+        //          << mem_info.port.node->name() << ":" << mem_info.port.port_id
+        //          << " of size " << mem_info.memory_used
+        //          << " device = " << fanout_to_swap.node->device()
+        //          << " node_ptr = " << (void*) fanout_to_swap.node;
+
         (*nodes_to_swap)[fanout_to_swap.node].inputs_to_swap.push_back(
             fanout_to_swap.port_id);
       }
       required_savings -= mem_info.memory_used;
       updated_graph = true;
       if (required_savings < 0) {
+        //LOG(INFO) << __func__ << " required savings = " << required_savings;
         break;
       }
     }
@@ -1119,6 +1145,9 @@ bool SwappingPass(RewriterConfig::MemOptType optimization_level,
   // Look for manual annotatations in the graph.
   for (auto& node : *item->graph.mutable_node()) {
     if (node.attr().count("_swap_to_host") != 0) {
+      //LOG(INFO) << __func__ << " node: " << node.name()
+      //          << " type: " << node.op()
+      //          << " _swap_to_host-count = " << node.attr().count("_swap_to_host");
       SwapInfo& swap_info = nodes_to_swap[&node];
       const AttrValue& val = node.attr().at("_swap_to_host");
       if (val.has_list()) {
@@ -1131,6 +1160,8 @@ bool SwappingPass(RewriterConfig::MemOptType optimization_level,
       }
     }
   }
+  //LOG(INFO) << "nodes_to_swap.empty() = "
+  //          << nodes_to_swap.empty();
   if (nodes_to_swap.empty()) {
     // Nothing to do.
     return false;
@@ -1143,6 +1174,9 @@ bool SwappingPass(RewriterConfig::MemOptType optimization_level,
   }
   for (auto& swap : nodes_to_swap) {
     const NodeDef* node = swap.first;
+    //LOG(INFO) << __func__ << " node_swap.name = " << node->name()
+    //          << " device = " << node->device()
+    //          << " node_ptr = " << (void*) node;
     const std::vector<OpInfo::TensorProperties>& props =
         properties.GetInputProperties(node->name());
     SwapInfo& swap_info = swap.second;
@@ -1210,6 +1244,17 @@ bool SwappingPass(RewriterConfig::MemOptType optimization_level,
                .ok()) {
         continue;
       }
+      //LOG(INFO) << __func__ << " added swapping nodes for node "
+      //          << node->name()
+      //          << " op = " << node->op()
+      //          << " on device " << node->device()
+      //          << " first(out).name: " << swap_nodes.first->name()
+      //          << " .op: " << swap_nodes.first->op()
+      //          << " .device: " << swap_nodes.first->device()
+      //          << " second(in).name: " << swap_nodes.second->name()
+      //          << " .op: " << swap_nodes.second->op()
+      //          << " .device: " << swap_nodes.second->device();
+
       *swap_nodes.first->add_input() = node->input(input_id);
       *node->mutable_input(input_id) = swap_nodes.second->name();
 

@@ -42,6 +42,7 @@ limitations under the License.
 #include "tensorflow/core/platform/mutex.h"
 #include "tensorflow/core/platform/types.h"
 #include "tensorflow/core/util/ptr_util.h"
+#include "tensorflow/core/platform/default/stacktrace.h"
 
 namespace tensorflow {
 
@@ -82,7 +83,8 @@ Status MatchSignatureHelper(const DataTypeSlice expected_inputs,
 // OpKernel ------------------------------------------------------------------
 
 OpKernel::OpKernel(OpKernelConstruction* context)
-    : OpKernel(context, MakeUnique<const NodeDef>(context->def())) {}
+    : OpKernel(context, MakeUnique<const NodeDef>(context->def())) {
+}
 
 OpKernel::OpKernel(OpKernelConstruction* context,
                    std::unique_ptr<const NodeDef> node_def)

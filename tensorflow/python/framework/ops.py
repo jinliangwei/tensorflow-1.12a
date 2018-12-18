@@ -1577,6 +1577,8 @@ def _NodeDef(op_type, name, device=None, attrs=None):  # pylint: disable=redefin
       node_def.device = device(node_def)
     else:
       node_def.device = _device_string(device)
+    logging.info("create NodeDef, op_type = " + op_type + ", name = " + name
+                 + ", device = " + node_def.device)
   return node_def
 
 
@@ -1713,6 +1715,8 @@ class Operation(object):
             "Cannot create a tensor proto whose content is larger than 2GB.")
       if not _VALID_OP_NAME_REGEX.match(node_def.name):
         raise ValueError("'%s' is not a valid node name" % node_def.name)
+      logging.info("node_def.name = " + node_def.name + ", op = " + node_def.op
+                      + ", device = " + node_def.device)
       c_op = None
     elif type(node_def).__name__ == "SwigPyObject":
       assert inputs is None
@@ -1721,6 +1725,7 @@ class Operation(object):
       assert input_types is None
       assert original_op is None
       assert op_def is None
+      logging.info("c_op is node_def")
       c_op = node_def
     else:
       raise TypeError("node_def needs to be a NodeDef: %s" % node_def)

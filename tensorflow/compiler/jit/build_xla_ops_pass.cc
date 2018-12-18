@@ -33,6 +33,7 @@ limitations under the License.
 #include "tensorflow/core/lib/core/status.h"
 #include "tensorflow/core/lib/hash/hash.h"
 #include "tensorflow/core/public/version.h"
+#include "tensorflow/core/platform/default/stacktrace.h"
 
 namespace tensorflow {
 namespace {
@@ -139,6 +140,8 @@ Status ReplaceNodeWithXlaCompileAndXlaRun(Graph* g, Node* n) {
 }  // namespace
 
 Status BuildXlaOpsPass::Run(const GraphOptimizationPassOptions& options) {
+  LOG(INFO) << __func__ << " from BuildXlaOpsPass "
+            << tensorflow::CurrentStackTrace();
   Graph* graph = options.graph->get();
 
   for (Node* n : graph->op_nodes()) {
@@ -150,6 +153,8 @@ Status BuildXlaOpsPass::Run(const GraphOptimizationPassOptions& options) {
     // Only compile nodes that are marked for compilation by the
     // compilation-marking pass (via 'attr_name').
     if (IsXlaCompiledKernel(*n)) {
+      LOG(INFO) << __func__ << " node name = " << n->name()
+                << " type = " << n->type_string();
       TF_RETURN_IF_ERROR(ReplaceNodeWithXlaCompileAndXlaRun(graph, n));
     }
   }
