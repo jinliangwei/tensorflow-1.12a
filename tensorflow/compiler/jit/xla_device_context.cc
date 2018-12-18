@@ -41,7 +41,6 @@ void* XlaDeviceAllocator::AllocateRaw(size_t alignment, size_t num_bytes) {
   // allocate memory when used. This allows us to also know the shape of the
   // allocated Tensor, which is useful if the device's tensor representation
   // differs from the host.
-  LOG(INFO) << __func__ << " from XlaDeviceAllocator, size = " << num_bytes;
   return XlaTensor::ToOpaquePointer(new XlaTensor());
 }
 

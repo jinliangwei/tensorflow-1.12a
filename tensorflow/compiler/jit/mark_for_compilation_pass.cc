@@ -516,9 +516,6 @@ Status FindCompilationCandidates(
     if (node->type_string() == "_Retval") {
       continue;
     }
-    LOG(INFO) << __func__ << " found compilation candidate, node->name = " << node->name()
-              << " type = " << node->type_string()
-              << " is_compilable_fn(node, device_type) = " << is_compilable_fn(node, device_type);
     candidates->insert(node);
     --fuel;
   }
@@ -601,11 +598,6 @@ Status MarkForCompilationPass::Run(
       VLOG(2) << "Rejecting " << node->name() << ": could not find JIT device.";
       return false;
     }
-
-    LOG(INFO) << " node_name = " << node->name()
-    << " xla_device_registration = " << registration->compilation_device_name
-    << " requires_compilation = " << registration->requires_compilation
-    << " enable_jit_by_default = " << registration->enable_jit_by_default;
 
     // If this device requires a JIT, we must say yes.
     if (registration->requires_compilation) return true;

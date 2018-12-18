@@ -35,7 +35,6 @@ limitations under the License.
 #include "tensorflow/core/platform/byte_order.h"
 #include "tensorflow/core/platform/cpu_info.h"
 #include "tensorflow/core/platform/mem.h"
-#include "tensorflow/core/platform/default/stacktrace.h"
 
 namespace tensorflow {
 namespace grappler {
@@ -127,7 +126,7 @@ DeviceProperties GetDeviceInfo(const DeviceNameUtils::ParsedName& device) {
       PlatformGpuId platform_gpu_id;
       Status s = GpuIdManager::TfToPlatformGpuId(tf_gpu_id, &platform_gpu_id);
       if (!s.ok()) {
-        LOG(ERROR) << s << __func__ << " " << CurrentStackTrace();
+        LOG(ERROR) << s;
         return unknown;
       }
       return GetLocalGPUInfo(platform_gpu_id);

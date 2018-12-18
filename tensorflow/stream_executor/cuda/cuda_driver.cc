@@ -805,22 +805,10 @@ CUDADriver::ContextGetSharedMemConfig(CudaContext* context) {
   if (res != CUDA_SUCCESS) {
     LOG(ERROR) << "failed to allocate "
                << port::HumanReadableNumBytes::ToString(bytes) << " (" << bytes
-                << " bytes) from device: " << ToString(res)
-               << port::CurrentStackTrace();
+               << " bytes) from device: " << ToString(res);
     return nullptr;
   }
-
   void *ptr = reinterpret_cast<void *>(result);
-  {
-    size_t cuda_free_bytes = 0;
-    size_t cuda_total_bytes = 0;
-    CHECK(cuMemGetInfo(&cuda_free_bytes, &cuda_total_bytes) == CUDA_SUCCESS);
-    LOG(INFO) << __func__ << " allocated " << bytes << " bytes for context " << context
-              << " ptr = " << ptr
-              << " cuda_free_bytes = " << cuda_free_bytes
-              << " cuda_total_bytes = " << cuda_total_bytes;
-  }
-
   VLOG(2) << "allocated " << ptr << " for context " << context << " of "
           << bytes << " bytes";
   return ptr;
@@ -836,15 +824,6 @@ CUDADriver::ContextGetSharedMemConfig(CudaContext* context) {
                << "; result: " << ToString(res);
   } else {
     VLOG(2) << "deallocated " << location << " for context " << context;
-  }
-
-  {
-    size_t cuda_free_bytes = 0;
-    size_t cuda_total_bytes = 0;
-    CHECK(cuMemGetInfo(&cuda_free_bytes, &cuda_total_bytes) == CUDA_SUCCESS);
-    LOG(INFO) << __func__ << " deallocated ptr = " << location
-              << " cuda_free_bytes = " << cuda_free_bytes
-              << " cuda_total_bytes = " << cuda_total_bytes;
   }
 }
 

@@ -20,7 +20,6 @@ limitations under the License.
 #include "tensorflow/compiler/xla/status_macros.h"
 #include "tensorflow/compiler/xla/types.h"
 #include "tensorflow/compiler/xla/util.h"
-#include "tensorflow/core/platform/logging.h"
 
 namespace xla {
 
@@ -32,8 +31,6 @@ StreamExecutorMemoryAllocator::StreamExecutorMemoryAllocator(
 
 StatusOr<OwningDeviceMemory> StreamExecutorMemoryAllocator::Allocate(
     int device_ordinal, uint64 size, bool retry_on_failure) {
-  LOG(INFO) << __func__ << " from StreamExecutorMemoryAllocator, size = "
-            << size;
   TF_ASSIGN_OR_RETURN(se::StreamExecutor * stream_executor,
                       GetStreamExecutor(device_ordinal));
   se::DeviceMemoryBase result = stream_executor->AllocateArray<uint8>(size);
