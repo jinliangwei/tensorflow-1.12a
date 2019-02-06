@@ -18,6 +18,7 @@ limitations under the License.
 
 #include "tensorflow/core/common_runtime/gpu/gpu_id.h"
 #include "tensorflow/core/lib/core/status.h"
+#include <vector>
 
 namespace tensorflow {
 
@@ -32,6 +33,9 @@ class GpuIdManager {
   // Gets the platform_gpu_id associated with tf_gpu_id. Returns OK if found.
   static Status TfToPlatformGpuId(TfGpuId tf_gpu_id,
                                   PlatformGpuId* platform_gpu_id);
+
+  static Status PlatformToTfGpuIds(PlatformGpuId platform_gpu_id,
+                                   std::vector<TfGpuId>* tf_gpu_ids);
 
   // Clears the map. Used in unit tests only.
   static void TestOnlyReset();

@@ -56,7 +56,8 @@ Status XlaCpuDeviceFactory::CreateDevices(const SessionOptions& options,
                                        /*transfer_as_literal=*/false,
                                        /*use_multiple_streams=*/false,
                                        /*shape_representation_fn=*/{},
-                                       /*padded_shape_fn=*/{}, &device));
+                                       /*padded_shape_fn=*/{}, &device,
+                                       nullptr));
   devices->push_back(device.release());
   return Status::OK();
 }

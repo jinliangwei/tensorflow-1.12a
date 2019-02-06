@@ -44,7 +44,6 @@ Status KernelAttrsMatch(const KernelDef& kernel_def, AttrSlice attrs,
           "' with unsupported type: ",
           SummarizeAttrValue(constraint.allowed_values()));
     }
-
     const AttrValue* found = attrs.Find(constraint.name());
     if (found) {
       if (found->type() != DT_INVALID) {

@@ -17,6 +17,7 @@ limitations under the License.
 #define TENSORFLOW_COMPILER_XLA_SERVICE_DEVICE_MEMORY_ALLOCATOR_H_
 
 #include <vector>
+#include <unordered_map>
 
 #include "absl/types/span.h"
 #include "tensorflow/compiler/xla/service/owning_device_memory.h"
@@ -24,6 +25,10 @@ limitations under the License.
 #include "tensorflow/compiler/xla/types.h"
 #include "tensorflow/core/platform/stream_executor_no_cuda.h"
 #include "tensorflow/core/platform/types.h"
+
+namespace tensorflow {
+class Allocator;
+}
 
 namespace xla {
 
@@ -100,6 +105,27 @@ class StreamExecutorMemoryAllocator : public DeviceMemoryAllocator {
   // with the respective device ordinal is not supported by XLA.
   std::vector<se::StreamExecutor*> stream_executors_;
 };
+
+class AllocatorBackedDeviceMemoryAllocator : public DeviceMemoryAllocator {
+ public:
+  AllocatorBackedDeviceMemoryAllocator(const se::Platform* platform,
+                                       std::unordered_map<int32,
+                                       std::unordered_map<int32, tensorflow::Allocator*>> *allocator_map);
+
+  StatusOr<OwningDeviceMemory> Allocate(int device_ordinal, uint64 size,
+                                        bool retry_on_failure) override;
+
+  // Pull in two-arg overload that sets retry_on_failure to true.
+  using DeviceMemoryAllocator::Allocate;
+
+  Status Deallocate(int device_ordinal, se::DeviceMemoryBase mem) override;
+
+  bool AllowsAsynchronousDeallocation() const override;
+
+ private:
+  std::unordered_map<int32, tensorflow::Allocator*> allocator_map_;
+};
+
 
 }  // namespace xla
 

@@ -80,7 +80,7 @@ class Backend {
   se::Platform* platform() const { return platform_; }
   Compiler* compiler() const { return compiler_; }
   DeviceMemoryAllocator* memory_allocator() const {
-    return memory_allocator_.get();
+    return memory_allocator_ptr_;
   }
   TransferManager* transfer_manager() const { return transfer_manager_; }
   ComputationPlacer* computation_placer() const { return computation_placer_; }
@@ -171,6 +171,8 @@ class Backend {
 
   // The default memory allocator to use.
   std::unique_ptr<StreamExecutorMemoryAllocator> memory_allocator_;
+  // Not owned
+  DeviceMemoryAllocator* memory_allocator_ptr_;
 
   // For the CPU backend, an Eigen threadpool device for use by Eigen code.
   std::unique_ptr<EigenThreadPoolWrapper> intra_op_thread_pool_wrapper_;

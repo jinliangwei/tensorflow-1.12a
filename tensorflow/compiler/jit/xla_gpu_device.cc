@@ -22,6 +22,8 @@ limitations under the License.
 #include "tensorflow/compiler/tf2xla/xla_op_registry.h"
 #include "tensorflow/core/common_runtime/device_factory.h"
 #include "tensorflow/core/lib/core/status.h"
+#include "tensorflow/core/common_runtime/gpu/gpu_id.h"
+#include "tensorflow/core/common_runtime/gpu/gpu_id_manager.h"
 
 namespace tensorflow {
 
@@ -29,6 +31,11 @@ class XlaGpuDeviceFactory : public DeviceFactory {
  public:
   Status CreateDevices(const SessionOptions& options, const string& name_prefix,
                        std::vector<Device*>* devices) override;
+ private:
+  // PlatformGpuId to <TfGpuId, Allocator>
+  Status GetGpuDeviceAllocators(std::vector<Device*> *devices,
+                                std::unordered_map<int32,
+                                std::unordered_map<int32, Allocator*>> *allocators);
 };
 
 Status XlaGpuDeviceFactory::CreateDevices(const SessionOptions& options,
@@ -44,6 +51,9 @@ Status XlaGpuDeviceFactory::CreateDevices(const SessionOptions& options,
       RegisterXlaDeviceKernels(DEVICE_XLA_GPU, DEVICE_GPU_XLA_JIT);
   (void)registrations;
 
+  std::unordered_map<int32, std::unordered_map<int32, Allocator*>> gpu_device_allocators;
+  auto get_allocator_status = GetGpuDeviceAllocators(devices, &gpu_device_allocators);
+
   std::unique_ptr<XlaDevice> device;
   Status status =
       XlaDevice::Create("CUDA", DEVICE_XLA_GPU, 0, DEVICE_GPU_XLA_JIT, options,
@@ -51,7 +61,9 @@ Status XlaGpuDeviceFactory::CreateDevices(const SessionOptions& options,
                         /*transfer_as_literal=*/false,
                         /*use_multiple_streams=*/false,
                         /*shape_representation_fn=*/{},
-                        /*padded_shape_fn=*/{}, &device);
+                        /*padded_shape_fn=*/{}, &device,
+                        get_allocator_status.ok() ? &gpu_device_allocators : nullptr);
+
   if (!status.ok()) {
     // Treat failures as non-fatal; there might not be a GPU in the machine.
     VLOG(1) << "Failed to create XLA_GPU device: " << status;
@@ -69,6 +81,29 @@ Status XlaGpuDeviceFactory::CreateDevices(const SessionOptions& options,
   devices->push_back(device.release());
   return Status::OK();
 }
+
+Status XlaGpuDeviceFactory::GetGpuDeviceAllocators(std::vector<Device*> *devices,
+                                                   std::unordered_map<int32,
+                                                   std::unordered_map<int32, Allocator*>> *allocators) {
+  AllocatorAttributes allocator_attr;
+  allocator_attr.set_on_host(false);
+  for (auto* device : *devices) {
+    if (device->device_type() == "GPU") {
+      const auto &parsed_name = device->parsed_name();
+      if (!parsed_name.has_id) {
+        return errors::Unknown("device name has no id, device.name = ", device->name());
+      }
+      int32 tf_gpu_id = parsed_name.id;
+      PlatformGpuId platform_gpu_id;
+      TF_RETURN_IF_ERROR(
+          GpuIdManager::TfToPlatformGpuId(TfGpuId(tf_gpu_id), &platform_gpu_id));
+
+      (*allocators)[platform_gpu_id.value()][tf_gpu_id] = device->GetAllocator(allocator_attr);
+    }
+  }
+  return Status::OK();
+}
+
 
 REGISTER_LOCAL_DEVICE_FACTORY(DEVICE_XLA_GPU, XlaGpuDeviceFactory);
 

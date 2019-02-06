@@ -134,7 +134,8 @@ Status DefaultPaddedShapeFn(const Tensor& tensor, xla::Shape* shape) {
     const XlaOpRegistry::DeviceRegistration& registration,
     bool transfer_as_literal, bool use_multiple_streams,
     const XlaCompiler::ShapeRepresentationFn& shape_representation_fn,
-    const PaddedShapeFn& padded_shape_fn, std::unique_ptr<XlaDevice>* device) {
+    const PaddedShapeFn& padded_shape_fn, std::unique_ptr<XlaDevice>* device,
+    std::unordered_map<int32, std::unordered_map<int32, Allocator*>> *gpu_device_allocators) {
   VLOG(1) << "XlaDevice::Create " << platform_name << " " << device_name << ":"
           << device_ordinal;
 
@@ -156,7 +157,8 @@ Status DefaultPaddedShapeFn(const Tensor& tensor, xla::Shape* shape) {
       new XlaDevice(options, attrs, device_ordinal, DeviceType(jit_device_name),
                     platform.ValueOrDie(), transfer_as_literal,
                     use_multiple_streams, shape_representation_fn,
-                    padded_shape_fn ? padded_shape_fn : DefaultPaddedShapeFn));
+                    padded_shape_fn ? padded_shape_fn : DefaultPaddedShapeFn,
+                    gpu_device_allocators));
   return Status::OK();
 }
 
@@ -214,7 +216,8 @@ XlaDevice::XlaDevice(
     int device_ordinal, const DeviceType& jit_device_name,
     se::Platform* platform, bool transfer_as_literal, bool use_multiple_streams,
     const XlaCompiler::ShapeRepresentationFn& shape_representation_fn,
-    const PaddedShapeFn& padded_shape_fn)
+    const PaddedShapeFn& padded_shape_fn,
+    std::unordered_map<int32, std::unordered_map<int32, Allocator*>> *gpu_device_allocators)
     : LocalDevice(options, attrs),
       xla_metadata_(device_ordinal, platform, jit_device_name,
                     shape_representation_fn, padded_shape_fn,
@@ -228,6 +231,10 @@ XlaDevice::XlaDevice(
   VLOG(1) << "Created XLA device " << jit_device_name << " " << this;
   thread_pool_.reset(new thread::ThreadPool(options.env, "xla_device",
                                             /*num_threads=*/1));
+  if (gpu_device_allocators != nullptr) {
+    allocator_.reset(new xla::AllocatorBackedDeviceMemoryAllocator(platform_, gpu_device_allocators));
+    platform_->SetXlaBackendMemoryAllocator(allocator_.get());
+  }
 }
 
 XlaDevice::~XlaDevice() {

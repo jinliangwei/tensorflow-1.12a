@@ -1384,6 +1384,7 @@ Status DirectSession::GetOrCreateExecutors(
       str_util::Join(inputs_sorted, ","), "->",
       str_util::Join(outputs_sorted, ","), "/", str_util::Join(tn_sorted, ","),
       "/", run_state_args->is_partial_run, "/", debug_tensor_watches_summary);
+  LOG(INFO) << __func__ << " sorted_key = " << sorted_key;
   // Set the handle, if its needed to log memory or for partial run.
   if (handle_name_counter_value >= 0) {
     run_state_args->handle =

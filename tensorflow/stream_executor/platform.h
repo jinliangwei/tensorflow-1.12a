@@ -29,6 +29,10 @@ limitations under the License.
 #include "tensorflow/stream_executor/plugin.h"
 #include "tensorflow/stream_executor/trace_listener.h"
 
+namespace xla {
+class DeviceMemoryAllocator;
+}
+
 namespace stream_executor {
 
 class StreamExecutor;
@@ -194,11 +198,15 @@ class Platform {
   // each device ordinal in the system, should any not yet exist.
   virtual port::Status EnablePeerAccess();
 
+  virtual void SetXlaBackendMemoryAllocator(xla::DeviceMemoryAllocator* allocator);
+  virtual xla::DeviceMemoryAllocator *GetXlaBackendMemoryAllocator();
+
  protected:
   // SE_DISALLOW_COPY_AND_ASSIGN declares a constructor, which suppresses the
   // presence of the default constructor. This statement re-enables it, which
   // simplifies subclassing.
   Platform() = default;
+  xla::DeviceMemoryAllocator* xla_backend_memory_allocator_ = nullptr;
 
  private:
   SE_DISALLOW_COPY_AND_ASSIGN(Platform);

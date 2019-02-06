@@ -982,7 +982,6 @@ Status FindKernelRegistration(const DeviceType& device_type,
   *was_attr_mismatch = false;
   // Label defaults to empty if not found in NodeDef.
   const string& label = GetNodeAttrString(node_def, kKernelAttr);
-
   const string key = Key(node_def.op(), device_type, label);
   auto regs = GlobalKernelRegistryTyped()->equal_range(key);
   for (auto iter = regs.first; iter != regs.second; ++iter) {

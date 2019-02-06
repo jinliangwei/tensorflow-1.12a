@@ -134,4 +134,14 @@ port::Status Platform::EnablePeerAccess() {
   return port::Status::OK();
 }
 
+void
+Platform::SetXlaBackendMemoryAllocator(xla::DeviceMemoryAllocator* allocator) {
+  xla_backend_memory_allocator_ = allocator;
+}
+
+xla::DeviceMemoryAllocator*
+Platform::GetXlaBackendMemoryAllocator() {
+  return xla_backend_memory_allocator_;
+}
+
 }  // namespace stream_executor

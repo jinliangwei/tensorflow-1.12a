@@ -303,6 +303,7 @@ class ColocationGraph {
     // "devices" will contain the set of feasible placements for the
     // colocated node set containing 'node'.
     std::vector<Device*> devices;
+
     if (DeviceNameUtils::HasSomeDetails(members_[node_root].device_name)) {
       // The root node has a (possibly partial) device
       // specification, so enumerate the physical devices that
@@ -924,7 +925,7 @@ void Placer::LogDeviceAssignment(const Node* node) const {
   if (log_device_placement_) {
     printf("%s: (%s): %s\n", node->name().c_str(), node->type_string().c_str(),
            node->assigned_device_name().c_str());
-    LOG(INFO) << node->name() << ": "
+    LOG(INFO) << " " << node->name() << ": "
               << "(" << node->type_string() << ")"
               << node->assigned_device_name();
   }

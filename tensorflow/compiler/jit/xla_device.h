@@ -42,6 +42,7 @@ limitations under the License.
 #include "tensorflow/core/lib/core/status.h"
 #include "tensorflow/core/platform/mutex.h"
 #include "tensorflow/core/platform/stream_executor_no_cuda.h"
+#include "tensorflow/compiler/xla/service/device_memory_allocator.h"
 
 namespace tensorflow {
 
@@ -109,7 +110,8 @@ class XlaDevice : public LocalDevice {
       const XlaOpRegistry::DeviceRegistration& registration,
       bool transfer_as_literal, bool use_multiple_streams,
       const XlaCompiler::ShapeRepresentationFn& shape_representation_fn,
-      const PaddedShapeFn& padded_shape_fn, std::unique_ptr<XlaDevice>* device);
+      const PaddedShapeFn& padded_shape_fn, std::unique_ptr<XlaDevice>* device,
+      std::unordered_map<int32, std::unordered_map<int32, Allocator*>> *allocator_map);
 
   // Creates a new XLA Device.
   // If padded_shape_fn is empty, a default implementation that returns
@@ -119,7 +121,8 @@ class XlaDevice : public LocalDevice {
             se::Platform* platform, bool transfer_as_literal,
             bool use_multiple_streams,
             const XlaCompiler::ShapeRepresentationFn& shape_representation_fn,
-            const PaddedShapeFn& padded_shape_fn);
+            const PaddedShapeFn& padded_shape_fn,
+            std::unordered_map<int32, std::unordered_map<int32, Allocator*>> *gpu_device_allocators);
   ~XlaDevice() override;
 
   Allocator* GetAllocator(AllocatorAttributes attr) override
@@ -217,6 +220,7 @@ class XlaDevice : public LocalDevice {
   // True if the device requires XlaDevice::Sync to be called on completion
   // regardless of status.
   bool sync_on_completion_ GUARDED_BY(mu_) = false;
+  std::unique_ptr<xla::AllocatorBackedDeviceMemoryAllocator> allocator_;
 };
 
 // Builds OpKernel registrations on 'device' for the JIT operators

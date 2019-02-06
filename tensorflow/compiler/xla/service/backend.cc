@@ -127,9 +127,17 @@ Backend::Backend(se::Platform* platform, Compiler* compiler,
       stream_executors_.push_back(exec);
     }
   }
-  // Create a memory allocator for the valid stream executors.
-  memory_allocator_ = absl::make_unique<StreamExecutorMemoryAllocator>(
-      platform, stream_executors);
+
+  auto existing_memory_allocator = platform->GetXlaBackendMemoryAllocator();
+  if (existing_memory_allocator != nullptr) {
+    memory_allocator_ptr_ = existing_memory_allocator;
+  } else {
+    // Create a memory allocator for the valid stream executors.
+    memory_allocator_ = absl::make_unique<StreamExecutorMemoryAllocator>(
+        platform, stream_executors);
+    memory_allocator_ptr_ = memory_allocator_.get();
+  }
+
   CHECK(!stream_executors_.empty())
       << "Service found no devices for backend " << platform_->Name() << '.';
 
