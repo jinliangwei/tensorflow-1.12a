@@ -39,7 +39,7 @@ limitations under the License.
 #include "tensorflow/core/lib/core/status.h"
 #include "tensorflow/core/lib/gtl/map_util.h"
 #include "tensorflow/core/util/ptr_util.h"
-
+#include "tensorflow/core/platform/stacktrace.h"
 namespace tensorflow {
 namespace grappler {
 
@@ -282,6 +282,10 @@ Status MetaOptimizer::OptimizeGraph(Cluster* cluster, const GrapplerItem& item,
           << " num_optimizers=" << optimizers.size()
           << ", num nodes = " << item.graph.node_size();
 
+  //LOG(INFO) << "Optimize GrapplerItem: item.id=" << item.id
+  //          << " num_optimizers=" << optimizers.size()
+  //          << ", num nodes = " << item.graph.node_size();
+
   if (optimizers.empty()) {
     VLOG(3) << "Skipping graph optimization, no optimizers registered";
     *optimized_graph = item.graph;
@@ -390,6 +394,7 @@ Status MetaOptimizer::RunOptimizer(
 
 Status MetaOptimizer::Optimize(Cluster* cluster, const GrapplerItem& item,
                                GraphDef* optimized_graph) {
+  //LOG(INFO) << " MetaOptimizer " << __func__ << " " << CurrentStackTrace();
   VLOG(1) << "Starting optimization for grappler item: " << item.id;
   optimization_results_.clear();
 

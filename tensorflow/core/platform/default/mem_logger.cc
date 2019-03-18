@@ -1,6 +1,7 @@
 #include "tensorflow/core/platform/default/mem_logger.h"
 #include "tensorflow/core/platform/default/logging.h"
 #include "tensorflow/core/platform/env_time.h"
+#include "tensorflow/core/platform/stacktrace.h"
 #include <unistd.h>
 namespace tensorflow {
 namespace internal {
@@ -11,6 +12,8 @@ const char* MemLogger::kAllocTypeTemporary = "Temporary";
 const char* MemLogger::kAllocTypeOutput = "Output";
 const char* MemLogger::kAllocTypeCopy = "Copy";
 const char* MemLogger::kAllocTypeRecvCopy = "RecvCopy";
+const char* MemLogger::kAllocTypeInitScratchBuffers = "InitScratchBuffers";
+
 thread_local std::string MemLogger::op_name_ = "unknown";
 thread_local std::string MemLogger::op_type_ = "unknown";
 thread_local MemLogger::AllocType MemLogger::alloc_type_ = MemLogger::AllocType::kUnknown;
@@ -61,9 +64,9 @@ void MemLogger::LogAlloc(uintptr_t ptr,
           time_stamp, AllocTypeToString(alloc_type_), op_name_.c_str(), op_type_.c_str(), ptr, size, allocator_bytes_in_use);
   fclose(log_file);
   if (kLogToStderr) {
-    char buff[100];
-    sprintf(buff, "[%ld] Allocate type:%s ptr:%ld bytes:%ld bytes_in_use:%ld\n",
-            time_stamp, AllocTypeToString(alloc_type_), ptr, size, allocator_bytes_in_use);
+    char buff[400];
+    sprintf(buff, "[%ld] Allocate type:%s op_name:%s op_type:%s ptr:%ld bytes:%ld bytes_in_use:%ld\n",
+          time_stamp, AllocTypeToString(alloc_type_), op_name_.c_str(), op_type_.c_str(), ptr, size, allocator_bytes_in_use);
     LOG(INFO) << buff << " allocator = " << (void*) this;
   }
 }
@@ -106,6 +109,8 @@ const char *MemLogger::AllocTypeToString(AllocType alloc_type) {
       return kAllocTypeCopy;
     case AllocType::kRecvCopy:
       return kAllocTypeRecvCopy;
+    case AllocType::kInitScratchBuffers:
+      return kAllocTypeInitScratchBuffers;
     default:
       LOG(FATAL) << __func__ << " unknown AllocType = " << static_cast<int>(alloc_type);
   }

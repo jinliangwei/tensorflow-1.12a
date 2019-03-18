@@ -54,5 +54,34 @@ REGISTER_OP("_CopyFromHostToGpu")
     })
     .Doc("Copies the input tensor from the host to the GPU.");
 
+REGISTER_OP("_CopyFromGpuToHostAndClear")
+    .Input("input: Ref(T)")
+    .Output("output: T")
+    .Attr("T: type")
+    .SetShapeFn([](shape_inference::InferenceContext* c) {
+      c->set_output(0, c->input(0));
+      auto* handle_data = c->input_handle_shapes_and_types(0);
+      if (handle_data != nullptr) {
+        c->set_output_handle_shapes_and_types(0, *handle_data);
+      }
+      return Status::OK();
+    })
+    .Doc("Copies the input reference tensor from gpu to the host and clear the input tensor.");
+
+REGISTER_OP("_CopyFromHostToGpuAndAssign")
+    .Input("ref: Ref(T)")
+    .Input("value: T")
+    .Output("output: Ref(T)")
+    .Attr("T: type")
+    .SetShapeFn([](shape_inference::InferenceContext* c) {
+      c->set_output(0, c->input(0));
+      auto* handle_data = c->input_handle_shapes_and_types(0);
+      if (handle_data != nullptr) {
+        c->set_output_handle_shapes_and_types(0, *handle_data);
+      }
+      return Status::OK();
+    })
+    .Doc("Copies the input tensor from the host to the GPU and assigns it to a variable.");
+
 }  // namespace
 }  // namespace tensorflow

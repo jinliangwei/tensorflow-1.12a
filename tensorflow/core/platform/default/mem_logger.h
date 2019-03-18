@@ -12,7 +12,8 @@ public:
   kTemporary = 2,
      kOutput = 3,
        kCopy = 4,
-   kRecvCopy = 5
+   kRecvCopy = 5,
+kInitScratchBuffers = 6
   };
 
   MemLogger(const std::string &path_prefix, bool log_to_stderr,
@@ -42,6 +43,7 @@ private:
   static const char *kAllocTypeOutput;
   static const char *kAllocTypeCopy;
   static const char *kAllocTypeRecvCopy;
+  static const char *kAllocTypeInitScratchBuffers;
 };
 }
 }

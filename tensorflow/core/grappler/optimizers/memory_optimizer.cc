@@ -417,6 +417,8 @@ void RecomputeSubgraph(
 void RecomputationRewritingPass(RewriterConfig::MemOptType optimization_level,
                                 const string& recomputation_targets_name_scope,
                                 GraphDef* graph, const GrapplerItem& item) {
+  //LOG(INFO) << __func__ << " optimization_level = " << static_cast<int>(optimization_level);
+
   if (optimization_level != RewriterConfig::RECOMPUTATION_HEURISTICS &&
       optimization_level != RewriterConfig::HEURISTICS &&
       optimization_level != RewriterConfig::MANUAL) {
@@ -491,6 +493,7 @@ void RecomputationRewritingPass(RewriterConfig::MemOptType optimization_level,
 }
 
 bool SchedulingPass(Cluster* cluster, GrapplerItem* item) {
+  //LOG(INFO) << __func__;
   // Look for AddN nodes (and equivalent) and record input names.
   GraphView view(&item->graph);
 
@@ -511,6 +514,8 @@ bool SchedulingPass(Cluster* cluster, GrapplerItem* item) {
       }
     }
   }
+
+  //LOG(INFO) << __func__ << " addn_list.empty() = " << addn_list.empty();
 
   if (addn_list.empty()) {
     return false;
@@ -958,8 +963,9 @@ static bool IdentifySwappingCandidates(
   for (const auto& device : devices) {
     const string& name = device.first;
     const DeviceProperties& prop = device.second;
-    //LOG(INFO) << __func__ << " name = " << name
-    //          << " prop.type() = " << prop.type();
+    LOG(INFO) << __func__ << " name = " << name
+              << " prop.type() = " << prop.type()
+              << " memory_size = " << prop.memory_size();
     if (prop.type() != "GPU") {
       continue;
     }
@@ -967,11 +973,10 @@ static bool IdentifySwappingCandidates(
       VLOG(1) << "Peak memory usage unknown for device " << name;
       continue;
     }
-    //LOG(INFO) << __func__ << " device.name = " << name
-    //          << " device.type = " << prop.type();
+
     const GraphMemory::MemoryUsage& mem_usage = memory.GetPeakMemoryUsage(name);
-    //LOG(INFO) << __func__ << " device.name = " << name
-    //          << " peak_memory_usage = " << mem_usage.used_memory;
+    LOG(INFO) << __func__ << " device.name = " << name
+              << " peak_memory_usage = " << mem_usage.used_memory;
 
     if (mem_usage.used_memory <= prop.memory_size()) {
       continue;
@@ -994,14 +999,14 @@ static bool IdentifySwappingCandidates(
       }
 
       for (const auto& dev_stats : metadata.step_stats().dev_stats()) {
-        //LOG(INFO) << __func__ << " device_stats.devce = " << dev_stats.device();
+        LOG(INFO) << __func__ << " device_stats.devce = " << dev_stats.device();
         for (const auto& node_stats : dev_stats.node_stats()) {
           Costs::NanoSeconds exec_time =
               Costs::NanoSeconds(1) +
               Costs::MicroSeconds(node_stats.all_start_micros() +
                                   node_stats.op_end_rel_micros());
-          //LOG(INFO) << __func__ << " node = " << node_stats.node_name()
-          //          << " exec_time = " << exec_time;
+          LOG(INFO) << __func__ << " node = " << node_stats.node_name()
+                    << " exec_time = " << exec_time;
           op_completion_times.emplace(node_stats.node_name(), exec_time);
         }
       }
@@ -1018,23 +1023,28 @@ static bool IdentifySwappingCandidates(
 
     GraphView graph(&item->graph);
     for (const auto& live_tensor : mem_usage.live_tensors) {
+      LOG(INFO) << __func__ << " tensor.node = " << live_tensor.node;
       if (live_tensor.memory_used <= 1024) {
         // Don't bother with small tensors.
+        LOG(INFO) << __func__ << " skip small tensors";
         continue;
       }
       if (live_tensor.deallocation_time - live_tensor.allocation_time <=
           Costs::Duration(1e6)) {
         // Not enough time to swap.
         VLOG(1) << "Not enough time to swap: skipping " << live_tensor.node;
+        LOG(INFO) << "Not enough time to swap: skipping " << live_tensor.node;
         continue;
       }
 
       if (skip_list->find(live_tensor.node) != skip_list->end()) {
+        LOG(INFO) << __func__ << " skip tensor generated from node " << live_tensor.node;
         continue;
       }
       GraphView::OutputPort port =
           graph.GetOutputPort(live_tensor.node, live_tensor.output_id);
       if (!IsSwappable(graph, port)) {
+        LOG(INFO) << __func__ << " output port not swappable, node = " << live_tensor.node;
         continue;
       }
       MemInfo mem_info;
@@ -1047,6 +1057,7 @@ static bool IdentifySwappingCandidates(
         // Get execution time.
         auto it = op_completion_times.find(input.node->name());
         if (it == op_completion_times.end()) {
+          LOG(INFO) << __func__ << " no completion time";
           valid = false;
           break;
         }
@@ -1063,16 +1074,20 @@ static bool IdentifySwappingCandidates(
         }
 
         if (skip_list->find(input.node->name()) != skip_list->end()) {
+          LOG(INFO) << __func__ << " skip input node, name = " << input.node->name();
           valid = false;
           break;
         }
         string input_name =
             strings::StrCat(input.node->name(), ":", input.port_id);
         if (skip_list->find(input_name) != skip_list->end()) {
+          LOG(INFO) << __func__ << " skip input port, name = " << input_name;
           valid = false;
           break;
         }
+
         if (!IsSwappable(input)) {
+          LOG(INFO) << __func__ << " not swappable";
           valid = false;
           break;
         }
@@ -1081,7 +1096,7 @@ static bool IdentifySwappingCandidates(
         mem_info.uses_left.emplace_back(input);
         earliest_use = std::min(earliest_use, it->second);
       }
-
+      LOG(INFO) << __func__ << " valid = " << valid;
       if (valid && !mem_info.uses_left.empty()) {
         // Compute the fitness: we need the tensor to be generated way away of
         // the time of peak memory usage (to ensure there is enough time to swap
@@ -1111,30 +1126,33 @@ static bool IdentifySwappingCandidates(
                 << mem_info.port.node->name() << ":" << mem_info.port.port_id
                 << " of size " << mem_info.memory_used;
 
-        //LOG(INFO) << "Will swap fanout " << fanout_to_swap.node->name() << ":"
-        //          << fanout_to_swap.port_id << " of tensor "
-        //          << mem_info.port.node->name() << ":" << mem_info.port.port_id
-        //          << " of size " << mem_info.memory_used
-        //          << " device = " << fanout_to_swap.node->device()
-        //          << " node_ptr = " << (void*) fanout_to_swap.node;
+        LOG(INFO) << "Will swap fanout " << fanout_to_swap.node->name() << ":"
+                  << fanout_to_swap.port_id << " of tensor "
+                  << mem_info.port.node->name() << ":" << mem_info.port.port_id
+                  << " of size " << mem_info.memory_used
+                  << " device = " << fanout_to_swap.node->device()
+                  << " node_ptr = " << (void*) fanout_to_swap.node;
 
         (*nodes_to_swap)[fanout_to_swap.node].inputs_to_swap.push_back(
             fanout_to_swap.port_id);
       }
       required_savings -= mem_info.memory_used;
+      LOG(INFO) << __func__ << " required savings = " << required_savings;
       updated_graph = true;
       if (required_savings < 0) {
-        //LOG(INFO) << __func__ << " required savings = " << required_savings;
+        LOG(INFO) << __func__ << " required savings = " << required_savings << " break";
         break;
       }
     }
   }
+  LOG(INFO) << __func__ << " updated_graph = " << updated_graph;
   return updated_graph;
 }
 
 bool SwappingPass(RewriterConfig::MemOptType optimization_level,
                   Cluster* cluster, GrapplerItem* item,
                   std::unordered_set<string>* skip_list) {
+  LOG(INFO) << __func__;
   std::unordered_map<NodeDef*, SwapInfo> nodes_to_swap;
   if (optimization_level == RewriterConfig::DEFAULT_MEM_OPT ||
       optimization_level == RewriterConfig::SWAPPING_HEURISTICS ||
@@ -1145,9 +1163,9 @@ bool SwappingPass(RewriterConfig::MemOptType optimization_level,
   // Look for manual annotatations in the graph.
   for (auto& node : *item->graph.mutable_node()) {
     if (node.attr().count("_swap_to_host") != 0) {
-      //LOG(INFO) << __func__ << " node: " << node.name()
-      //          << " type: " << node.op()
-      //          << " _swap_to_host-count = " << node.attr().count("_swap_to_host");
+      LOG(INFO) << __func__ << " node: " << node.name()
+                << " type: " << node.op()
+                << " _swap_to_host-count = " << node.attr().count("_swap_to_host");
       SwapInfo& swap_info = nodes_to_swap[&node];
       const AttrValue& val = node.attr().at("_swap_to_host");
       if (val.has_list()) {
@@ -1160,8 +1178,7 @@ bool SwappingPass(RewriterConfig::MemOptType optimization_level,
       }
     }
   }
-  //LOG(INFO) << "nodes_to_swap.empty() = "
-  //          << nodes_to_swap.empty();
+  LOG(INFO) << "nodes_to_swap.empty() = " << nodes_to_swap.empty();
   if (nodes_to_swap.empty()) {
     // Nothing to do.
     return false;
@@ -1174,9 +1191,9 @@ bool SwappingPass(RewriterConfig::MemOptType optimization_level,
   }
   for (auto& swap : nodes_to_swap) {
     const NodeDef* node = swap.first;
-    //LOG(INFO) << __func__ << " node_swap.name = " << node->name()
-    //          << " device = " << node->device()
-    //          << " node_ptr = " << (void*) node;
+    LOG(INFO) << __func__ << " node_swap.name = " << node->name()
+              << " device = " << node->device()
+              << " node_ptr = " << (void*) node;
     const std::vector<OpInfo::TensorProperties>& props =
         properties.GetInputProperties(node->name());
     SwapInfo& swap_info = swap.second;
@@ -1244,16 +1261,17 @@ bool SwappingPass(RewriterConfig::MemOptType optimization_level,
                .ok()) {
         continue;
       }
-      //LOG(INFO) << __func__ << " added swapping nodes for node "
-      //          << node->name()
-      //          << " op = " << node->op()
-      //          << " on device " << node->device()
-      //          << " first(out).name: " << swap_nodes.first->name()
-      //          << " .op: " << swap_nodes.first->op()
-      //          << " .device: " << swap_nodes.first->device()
-      //          << " second(in).name: " << swap_nodes.second->name()
-      //          << " .op: " << swap_nodes.second->op()
-      //          << " .device: " << swap_nodes.second->device();
+      updated_graph = true;
+      LOG(INFO) << __func__ << " added swapping nodes for node "
+                << node->name()
+                << " op = " << node->op()
+                << " on device " << node->device()
+                << " first(out).name: " << swap_nodes.first->name()
+                << " .op: " << swap_nodes.first->op()
+                << " .device: " << swap_nodes.first->device()
+                << " second(in).name: " << swap_nodes.second->name()
+                << " .op: " << swap_nodes.second->op()
+                << " .device: " << swap_nodes.second->device();
 
       *swap_nodes.first->add_input() = node->input(input_id);
       *node->mutable_input(input_id) = swap_nodes.second->name();
@@ -1267,6 +1285,7 @@ bool SwappingPass(RewriterConfig::MemOptType optimization_level,
       skip_list->insert(swap_nodes.second->name());
     }
   }
+  LOG(INFO) << __func__ << " updated_graph = " << updated_graph;
   return updated_graph;
 }
 
@@ -1346,6 +1365,7 @@ Status RelaxAllocatorConstraints(GraphDef* optimized_graph) {
 
 Status MemoryOptimizer::Optimize(Cluster* cluster, const GrapplerItem& item,
                                  GraphDef* optimized_graph) {
+  LOG(INFO) << __func__ << " from MemoryOptimizer";
   *optimized_graph = item.graph;
 
   RecomputationRewritingPass(optimization_level_,
@@ -1371,6 +1391,8 @@ Status MemoryOptimizer::Optimize(Cluster* cluster, const GrapplerItem& item,
          optimization_level_ == RewriterConfig::HEURISTICS ||
          optimization_level_ == RewriterConfig::MANUAL) &&
         cluster != nullptr) {
+      LOG(INFO) << __func__ << " swapping_pass, i = "
+                << i;
       updated_graph |= SwappingPass(optimization_level_, cluster,
                                     &optimized_item, &skip_list);
     }

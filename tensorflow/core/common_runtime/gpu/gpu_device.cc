@@ -298,8 +298,10 @@ Status BaseGPUDevice::InitScratchBuffers() {
       if (scratch_.size() > i && scratch_[i]) continue;
       size_t scratch_buffer_size =
           Eigen::kCudaScratchSize + sizeof(unsigned int);
+      gpu_allocator_->SetAllocationInfo(internal::MemLogger::AllocType::kInitScratchBuffers);
       void* scratch_buffer = gpu_allocator_->AllocateRaw(
           Allocator::kAllocatorAlignment, scratch_buffer_size);
+      gpu_allocator_->ResetAllocationInfo();
       if (scratch_buffer == nullptr) {
         return errors::FailedPrecondition(
             "Failed to allocate scratch buffer for device ",

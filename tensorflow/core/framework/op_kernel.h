@@ -700,6 +700,8 @@ class OpKernelContext {
   // REQUIRES: IsRefType(input_dtype(input_index)).
   void delete_ref_input(int input_index, bool lock_held);
 
+  void clear_ref_input(int input_index, bool lock_held);
+
   // Return true if there is input at the given index. An operator has no
   // input at index if its tensor is null. This is primarily used by the
   // merge operator.

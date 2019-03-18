@@ -1483,6 +1483,7 @@ void ExecutorImpl::InitializePending(const Graph* graph,
 }
 
 void ExecutorState::RunAsync(Executor::DoneCallback done) {
+  LOG(INFO) << __func__ << " Start";
   const Graph* graph = impl_->graph_.get();
   TaggedNodeSeq ready;
 
@@ -1511,6 +1512,7 @@ void ExecutorState::RunAsync(Executor::DoneCallback done) {
     // Schedule to run all the ready ops in thread pool.
     ScheduleReady(ready, nullptr);
   }
+  LOG(INFO) << __func__ << " End";
 }
 
 // State kept alive for executing an asynchronous node in another
@@ -1586,6 +1588,9 @@ bool MightTrace(const NodeItem& item,
 }
 
 void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
+  //LOG(INFO) << __func__ << " node.name = " << tagged_node.node->name()
+  //          << " type = " << tagged_node.node->type_string();
+
   const GraphView& gview = impl_->gview_;
   TaggedNodeSeq ready;
   TaggedNodeReadyQueue inline_ready;
@@ -1654,6 +1659,12 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
       nodestats::SetAllStart(stats);
     }
 
+    //LOG(INFO) << __func__ << " pop node.name = " << node->name()
+    //          << " type = " << node->type_string()
+    //          << " id = " << id << " step " << params.step_id << " "
+    //          << SummarizeNode(*node) << (tagged_node.is_dead ? " is dead" : "")
+    //          << " device: " << device->name();
+
     if (vlog_) {
       VLOG(1) << "Process node: " << id << " step " << params.step_id << " "
               << SummarizeNode(*node) << (tagged_node.is_dead ? " is dead" : "")
@@ -1678,6 +1689,7 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
       s = PrepareInputs(item, first_input, &inputs, &input_device_contexts,
                         &input_alloc_attrs, &is_input_dead);
       if (!s.ok()) {
+        //LOG(INFO) << __func__ << " PrepareInputs failed";
         // Clear inputs.
         int num_inputs = item.num_inputs;
         for (int i = 0; i < num_inputs; ++i) {
@@ -1751,6 +1763,7 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
           if (completed) Finish();
         };
         nodestats::SetOpStart(stats);
+        //LOG(INFO) << __func__ << " ComputeAsync";
         device->ComputeAsync(async, &state->ctx, done);
       } else {
         // Synchronous computes.
@@ -1763,6 +1776,7 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
           const string& op_name = op_kernel->name();
           tracing::ScopedRegion region(tracing::EventCategory::kCompute,
                                        op_name);
+          //LOG(INFO) << __func__ << " ComputeSync";
           if (trace_using_annotations_) {
             // The OpKernel may create child activities (such as GPU kernel
             // launches), so use a `ScopedAnnotation` to relate these activities
@@ -1885,6 +1899,7 @@ Status ExecutorState::PrepareInputs(const NodeItem& item, Entry* first_input,
                            item.kernel->def());
         }
       }
+
       if (expect_ref) {
         inp->mutex_if_ref = entry->ref_mu;
         inp->tensor = entry->ref;
@@ -1898,6 +1913,7 @@ Status ExecutorState::PrepareInputs(const NodeItem& item, Entry* first_input,
           entry->val.Init(*entry->ref);
           entry->val_field_is_set = true;
         }
+
         entry->ref = nullptr;
         entry->ref_mu = nullptr;
 

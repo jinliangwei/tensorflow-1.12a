@@ -1289,6 +1289,7 @@ Status DirectSession::CreateExecutors(
     item->executor = nullptr;
     item->device = device;
     auto executor_type = options_.config.experimental().executor_type();
+    LOG(INFO) << __func__ << " executor_type = " << executor_type;
     TF_RETURN_IF_ERROR(NewExecutor(
         executor_type, params, std::move(partition_graph), &item->executor));
   }

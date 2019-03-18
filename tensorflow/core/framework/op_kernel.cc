@@ -562,6 +562,21 @@ void OpKernelContext::delete_ref_input(int index, bool lock_held) {
   }
 }
 
+void OpKernelContext::clear_ref_input(int index, bool lock_held) {
+  DCHECK_GE(index, 0);
+  DCHECK_LT(index, num_inputs());
+  DCHECK(input_is_ref(index));
+  // should only modify the tensor while holding the mutex
+  if (lock_held) {
+    DataType dtype = (*params_->inputs)[index].tensor->dtype();
+    *((*params_->inputs)[index].tensor) = Tensor(dtype);
+  } else {
+    mutex_lock l(*input_ref_mutex(index));
+    DataType dtype = (*params_->inputs)[index].tensor->dtype();
+    *((*params_->inputs)[index].tensor) = Tensor(dtype);
+  }
+}
+
 Status OpKernelContext::mutable_input(StringPiece name, Tensor* tensor,
                                       bool lock_held) {
   int start, stop;
