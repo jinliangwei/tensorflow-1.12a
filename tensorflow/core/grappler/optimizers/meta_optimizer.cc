@@ -25,6 +25,7 @@ limitations under the License.
 #include "tensorflow/core/grappler/optimizers/dependency_optimizer.h"
 #include "tensorflow/core/grappler/optimizers/experimental_implementation_selector.h"
 #include "tensorflow/core/grappler/optimizers/function_optimizer.h"
+#include "tensorflow/core/grappler/optimizers/graph_partitioner.h"
 #include "tensorflow/core/grappler/optimizers/layout_optimizer.h"
 #include "tensorflow/core/grappler/optimizers/loop_optimizer.h"
 #include "tensorflow/core/grappler/optimizers/memory_optimizer.h"
@@ -99,6 +100,7 @@ std::unique_ptr<GraphOptimizer> MetaOptimizer::MakeNewOptimizer(
   MK_OPT("remap", new Remapper(cfg_.remapping()));
   MK_OPT("layout", new LayoutOptimizer());
   MK_OPT("memory", new MemoryOptimizer(RewriterConfig::MANUAL));
+  MK_OPT("graph_partitioner", new GraphPartitioner(RewriterConfig::MANUAL));
   MK_OPT("arithmetic", new ArithmeticOptimizer(cfg_.arithmetic_optimization()));
   MK_OPT("autoparallel", new AutoParallel(cfg_.auto_parallel().num_replicas()));
   MK_OPT("loop", new LoopOptimizer(cfg_.loop_optimization(), cpu_device_));
@@ -167,15 +169,17 @@ Status MetaOptimizer::InitializeOptimizers(
           cfg_.memory_optimization(),
           cfg_.memory_optimizer_target_node_name_scope()));
     }
+    optimizers->push_back(
+        MakeUnique<GraphPartitioner>(cfg_.memory_optimization()));
   }
   if (cfg_.auto_parallel().enable()) {
     optimizers->push_back(
         MakeUnique<AutoParallel>(cfg_.auto_parallel().num_replicas()));
-  }
+   }
   if (cfg_.scoped_allocator_optimization()) {
     optimizers->push_back(MakeUnique<ScopedAllocatorOptimizer>(
         cfg_.scoped_allocator_optimization(), cfg_.scoped_allocator_opts()));
-  }
+   }
   return InitializeCustomGraphOptimizers(std::set<string>(), optimizers);
 }
 
@@ -282,10 +286,6 @@ Status MetaOptimizer::OptimizeGraph(Cluster* cluster, const GrapplerItem& item,
           << " num_optimizers=" << optimizers.size()
           << ", num nodes = " << item.graph.node_size();
 
-  //LOG(INFO) << "Optimize GrapplerItem: item.id=" << item.id
-  //          << " num_optimizers=" << optimizers.size()
-  //          << ", num nodes = " << item.graph.node_size();
-
   if (optimizers.empty()) {
     VLOG(3) << "Skipping graph optimization, no optimizers registered";
     *optimized_graph = item.graph;
@@ -299,6 +299,7 @@ Status MetaOptimizer::OptimizeGraph(Cluster* cluster, const GrapplerItem& item,
 
   bool is_optimized = false;
   GraphOptimizationResult optimization_result(item.id);
+  GraphOptimizer* graph_partitioner = nullptr;
   GraphOptimizer* fusion_optimizer = nullptr;
   GraphOptimizer* sa_optimizer = nullptr;
 
@@ -315,6 +316,10 @@ Status MetaOptimizer::OptimizeGraph(Cluster* cluster, const GrapplerItem& item,
     for (const auto& optimizer : optimizers) {
       // Some optimizers can run only once.
       if (iteration > 0 && IsRunOnceOptimizer(optimizer->name())) continue;
+      if (optimizer->name() == "graph_partitioner") {
+        if (graph_partitioner == nullptr) graph_partitioner = optimizer.get();
+        continue;
+      }
       // Some must run only on the last iteration.
       if (optimizer->name() == "scoped_allocator_optimizer") {
         if (sa_optimizer == nullptr) sa_optimizer = optimizer.get();
@@ -328,6 +333,12 @@ Status MetaOptimizer::OptimizeGraph(Cluster* cluster, const GrapplerItem& item,
                                    optimized_graph, &optimization_result);
       if (status.ok()) is_optimized = true;
     }
+  }
+
+  if (graph_partitioner != nullptr) {
+    Status status = RunOptimizer(graph_partitioner, cluster, &optimized_item,
+                                 optimized_graph, &optimization_result);
+    if (status.ok()) is_optimized = true;
   }
 
   // Run fusion optimizer if requested after all other optimizers since: 1) it
@@ -394,7 +405,6 @@ Status MetaOptimizer::RunOptimizer(
 
 Status MetaOptimizer::Optimize(Cluster* cluster, const GrapplerItem& item,
                                GraphDef* optimized_graph) {
-  //LOG(INFO) << " MetaOptimizer " << __func__ << " " << CurrentStackTrace();
   VLOG(1) << "Starting optimization for grappler item: " << item.id;
   optimization_results_.clear();
 

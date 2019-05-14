@@ -3,6 +3,9 @@
 #include "tensorflow/core/platform/env_time.h"
 #include "tensorflow/core/platform/stacktrace.h"
 #include <unistd.h>
+#include <errno.h>
+#include <string.h>
+
 namespace tensorflow {
 namespace internal {
 
@@ -39,11 +42,13 @@ MemLogger::MemLogger(const std::string &path_prefix,
 
   VLOG(3) << __func__ << " log_file_path = " << log_file_path_;
   FILE *log_file = fopen(log_file_path_.c_str(), "w");
+  CHECK(log_file != nullptr) << strerror(errno);
   fclose(log_file);
 }
 
 void MemLogger::LogSessionRunStart(int64_t time_stamp, int64_t step_id) const {
   FILE *log_file = fopen(log_file_path_.c_str(), "a");
+  CHECK(log_file != nullptr) << strerror(errno);
   fprintf(log_file, "[%ld] SessionRun Start counter:%d\n",
           time_stamp, step_id);
   fclose(log_file);
@@ -51,6 +56,7 @@ void MemLogger::LogSessionRunStart(int64_t time_stamp, int64_t step_id) const {
 
 void MemLogger::LogSessionRunEnd(int64_t time_stamp, int64_t step_id) const {
   FILE *log_file = fopen(log_file_path_.c_str(), "a");
+  CHECK(log_file != nullptr) << strerror(errno);
   fprintf(log_file, "[%ld] SessionRun End counter:%d\n",
           time_stamp, step_id);
   fclose(log_file);
@@ -60,6 +66,7 @@ void MemLogger::LogAlloc(uintptr_t ptr,
                          size_t size, size_t allocator_bytes_in_use,
                          int64_t time_stamp) const {
   FILE *log_file = fopen(log_file_path_.c_str(), "a");
+  CHECK(log_file != nullptr) << strerror(errno);
   fprintf(log_file, "[%ld] Allocate type:%s op_name:%s op_type:%s ptr:%ld bytes:%ld bytes_in_use:%ld\n",
           time_stamp, AllocTypeToString(alloc_type_), op_name_.c_str(), op_type_.c_str(), ptr, size, allocator_bytes_in_use);
   fclose(log_file);
@@ -74,6 +81,7 @@ void MemLogger::LogAlloc(uintptr_t ptr,
 void MemLogger::LogDealloc(uintptr_t ptr, size_t size,
                            size_t allocator_bytes_in_use, int64_t time_stamp) const {
   FILE *log_file = fopen(log_file_path_.c_str(), "a");
+  CHECK(log_file != nullptr) << strerror(errno);
   fprintf(log_file, "[%ld] Deallocate ptr:%ld bytes:%ld bytes_in_use:%ld\n",
           time_stamp, ptr, size, allocator_bytes_in_use);
   fclose(log_file);

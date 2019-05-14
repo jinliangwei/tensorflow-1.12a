@@ -61,7 +61,7 @@ class CopyFromHostToGpuKernel : public AsyncOpKernel {
   explicit CopyFromHostToGpuKernel(OpKernelConstruction* context)
       : AsyncOpKernel(context) {}
   void ComputeAsync(OpKernelContext* ctx, DoneCallback done) override {
-    //LOG(INFO) << __func__ << " from CopyFromHostToGpuKerne";
+    //LOG(INFO) << __func__ << " from CopyFromHostToGpuKernel";
     const Tensor& input = ctx->input(0);
     OP_REQUIRES_ASYNC(
         ctx, ctx->input_alloc_attr(0).on_host(),
@@ -91,7 +91,7 @@ class CopyFromGpuToHostAndClearKernel : public AsyncOpKernel {
   explicit CopyFromGpuToHostAndClearKernel(OpKernelConstruction* context)
       : AsyncOpKernel(context) {}
   void ComputeAsync(OpKernelContext* ctx, DoneCallback done) override {
-    LOG(INFO) << __func__ << " from CopyFromGpuToHostAndClearKernel";
+    //LOG(INFO) << __func__ << " from CopyFromGpuToHostAndClearKernel";
     mutex_lock l(*ctx->input_ref_mutex(0));
     Tensor lhs = ctx->mutable_input(0, true);
     OP_REQUIRES_ASYNC(
@@ -128,7 +128,7 @@ class CopyFromHostToGpuAndAssignKernel : public AsyncOpKernel {
   explicit CopyFromHostToGpuAndAssignKernel(OpKernelConstruction* context)
       : AsyncOpKernel(context) {}
   void ComputeAsync(OpKernelContext* ctx, DoneCallback done) override {
-    LOG(INFO) << __func__ << " from CopyFromHostToGpuAndAssignKernel";
+    //LOG(INFO) << __func__ << " from CopyFromHostToGpuAndAssignKernel";
     mutex_lock l(*ctx->input_ref_mutex(0));
     Tensor lhs = ctx->mutable_input(0, true);
     const Tensor& rhs = ctx->input(1);

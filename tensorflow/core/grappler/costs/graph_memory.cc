@@ -15,7 +15,6 @@ limitations under the License.
 
 #include "tensorflow/core/grappler/costs/graph_memory.h"
 
-#include <deque>
 #include "tensorflow/core/framework/allocation_description.pb.h"
 #include "tensorflow/core/framework/attr_value.pb.h"
 #include "tensorflow/core/framework/node_def.pb.h"
@@ -47,6 +46,25 @@ Status GraphMemory::InferStatically(
   InferFromTrace(metadata.step_stats());
   return Status::OK();
 }
+
+
+Status GraphMemory::InferStaticallyAndGetRunMetadata(
+    const std::unordered_map<string, DeviceProperties>& devices,
+    RunMetadata *metadata) {
+  VirtualCluster cluster(devices);
+  TF_RETURN_IF_ERROR(cluster.Provision());
+  TF_RETURN_IF_ERROR(cluster.Initialize(item_));
+  Status s = cluster.Run(item_.graph, item_.feed, item_.fetch, metadata);
+  // The virtual cluster returns the RESOURCE_EXHAUSTED error when it detects
+  // that the model would run out of memory. We still get the metadata we need
+  // out of the simulation, so we just ignore this error.
+  if (!s.ok() && s.code() != error::RESOURCE_EXHAUSTED) {
+    return s;
+  }
+  InferFromTrace(metadata->step_stats());
+  return Status::OK();
+}
+
 
 Status GraphMemory::InferDynamically(Cluster* cluster) {
   if (!cluster->DetailedStatsEnabled()) {
@@ -141,22 +159,6 @@ static GraphMemory::LiveTensor* FindOrCreateLiveTensor(
   return live;
 }
 
-namespace {
-struct Event {
-  Event(int64 _timestamp, bool _allocated,
-        const GraphMemory::LiveTensor* _tensor)
-      : timestamp(_timestamp), allocated(_allocated), tensor(_tensor) {}
-
-  int64 timestamp;
-  bool allocated;
-  const GraphMemory::LiveTensor* tensor;
-
-  bool operator<(const Event& other) const {
-    return timestamp < other.timestamp;
-  }
-};
-}  // namespace
-
 void GraphMemory::InferFromTrace(const StepStats& timeline) {
   std::unordered_map<string, string> node_placement;
   for (const auto& dev_stats : timeline.dev_stats()) {
@@ -165,8 +167,9 @@ void GraphMemory::InferFromTrace(const StepStats& timeline) {
     }
   }
 
+  live_tensors_per_device_.clear();
+  events_per_device_.clear();
   std::unordered_map<string, LiveTensor*> live_tensors;
-  std::unordered_map<string, std::deque<LiveTensor>> live_tensors_per_device;
   std::unordered_map<string, const NodeDef*> node_map;
   for (const NodeDef& node : item_.graph.node()) {
     node_map[node.name()] = &node;
@@ -175,7 +178,7 @@ void GraphMemory::InferFromTrace(const StepStats& timeline) {
     const string& device_name = dev_stats.device();
     const bool is_gpu = (device_name.find("GPU:") || device_name.find("gpu:"));
     std::deque<LiveTensor>& device_tensors =
-        live_tensors_per_device[dev_stats.device()];
+        live_tensors_per_device_[dev_stats.device()];
     for (const auto& node_stats : dev_stats.node_stats()) {
       for (int i = 0; i < node_stats.output_size(); ++i) {
         const auto& output = node_stats.output(i);
@@ -232,7 +235,7 @@ void GraphMemory::InferFromTrace(const StepStats& timeline) {
         }
         LiveTensor* live = FindOrCreateLiveTensor(
             input_node, position, &live_tensors,
-            &live_tensors_per_device[node_placement[input_node]]);
+            &live_tensors_per_device_[node_placement[input_node]]);
         live->deallocation_time = std::max<Costs::Duration>(
             live->deallocation_time,
             Costs::NanoSeconds(1) +
@@ -242,8 +245,9 @@ void GraphMemory::InferFromTrace(const StepStats& timeline) {
     }
   }
 
-  for (const auto& live_per_device : live_tensors_per_device) {
-    std::vector<Event> events;
+  for (const auto& live_per_device : live_tensors_per_device_) {
+    std::vector<Event>& events = events_per_device_[live_per_device.first];
+
     events.reserve(2 * live_per_device.second.size());
     for (const auto& live : live_per_device.second) {
       events.emplace_back(static_cast<int64>(live.allocation_time.count()),
@@ -257,8 +261,7 @@ void GraphMemory::InferFromTrace(const StepStats& timeline) {
     size_t current = 0;
     std::unordered_set<const LiveTensor*> currently_live;
     for (int i = 0; i < events.size(); ++i) {
-      const auto& event = events[i];
-
+      auto& event = events[i];
       if (event.allocated) {
         VLOG(1) << "At time " << event.timestamp << " allocated "
                 << event.tensor->memory_used << " for tensor "
@@ -272,6 +275,7 @@ void GraphMemory::InferFromTrace(const StepStats& timeline) {
         current -= event.tensor->memory_used;
         currently_live.erase(event.tensor);
       }
+      event.memory_used = current;
       if (i + 1 == events.size() ||
           event.timestamp != events[i + 1].timestamp) {
         if (current > peak) {

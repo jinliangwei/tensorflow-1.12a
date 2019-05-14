@@ -24,7 +24,6 @@ Status MakeIteratorFromInputElement(
     int64 thread_index, CapturedFunction* captured_func, StringPiece prefix,
     std::unique_ptr<IteratorBase>* out_iterator) {
   std::vector<Tensor> return_values;
-
   TF_RETURN_IF_ERROR(
       captured_func->RunWithBorrowedArgs(ctx, input_element, &return_values));
 

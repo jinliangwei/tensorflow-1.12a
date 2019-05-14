@@ -66,6 +66,9 @@ Status ComputeTopologicalOrder(
   }
 
   if (back != graph_view.num_nodes()) {
+    LOG(INFO) << __func__
+              << " The graph couldn't be sorted in topological order, num_nodes not executed = "
+              << graph_view.num_nodes() - back;
     return errors::InvalidArgument(
         "The graph couldn't be sorted in topological order.");
   }

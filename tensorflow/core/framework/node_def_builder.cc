@@ -202,6 +202,11 @@ NodeDefBuilder& NodeDefBuilder::Device(StringPiece device_spec) {
   return *this;
 }
 
+NodeDefBuilder& NodeDefBuilder::Priority(int32 priority) {
+  node_def_.set_priority(priority);
+  return *this;
+}
+
 Status NodeDefBuilder::Finalize(NodeDef* node_def) const {
   const std::vector<string>* errors_ptr = &errors_;
   std::vector<string> errors_storage;

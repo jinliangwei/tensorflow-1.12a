@@ -99,6 +99,11 @@ NodeBuilder& NodeBuilder::Device(StringPiece device_spec) {
   return *this;
 }
 
+NodeBuilder& NodeBuilder::Priority(int32 priority) {
+  def_builder_.Priority(priority);
+  return *this;
+}
+
 NodeBuilder& NodeBuilder::AssignedDevice(StringPiece device) {
   assigned_device_ = string(device);
   return *this;

@@ -32,6 +32,7 @@ limitations under the License.
 #include "tensorflow/core/lib/gtl/map_util.h"
 #include "tensorflow/core/lib/strings/str_util.h"
 #include "tensorflow/core/util/equal_graph_def.h"
+#include "tensorflow/core/platform/stacktrace.h"
 
 namespace tensorflow {
 

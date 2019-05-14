@@ -3102,7 +3102,9 @@ void ArithmeticOptimizer::DedupComputations() {
 
   // Delete duplicates
   if (fetch_nodes_known_ && !duplicates.empty()) {
+    //LOG(INFO) << __func__ << " from ArithmeticOptimizer";
     EraseNodesFromGraph(duplicates, optimized_graph_);
+    //LOG(INFO) << __func__ << " from ArithmeticOptimizer done";
     // Rebuild the NodeMap which was invalidated by the node  swapping above.
     node_map_.reset(new NodeMap(optimized_graph_));
   }

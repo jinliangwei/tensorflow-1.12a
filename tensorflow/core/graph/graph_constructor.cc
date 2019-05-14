@@ -527,6 +527,7 @@ Status GraphConstructor::InitFromEdges() {
       StringPiece input_name = node_def.input(i);
       TensorId id(ParseTensorName(input_name));
       if (opts_.input_map.count(id) == 0) {
+
         // If an input is not mapped, then the input should appear in the graph
         // being imported.
         auto iter = gdef_nodes_.find(id.first);

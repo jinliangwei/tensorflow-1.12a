@@ -197,6 +197,11 @@ void Node::set_requested_device(const string& device) {
   props_->node_def.set_device(device);
 }
 
+void Node::set_priority(int32 priority) {
+  MaybeCopyOnWrite();
+  props_->node_def.set_priority(priority);
+}
+
 Status Node::input_edge(int idx, const Edge** e) const {
   if (idx < 0 || idx >= num_inputs()) {
     return errors::InvalidArgument("Invalid input_edge index: ", idx, ", Node ",

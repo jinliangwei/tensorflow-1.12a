@@ -18,6 +18,7 @@ limitations under the License.
 #include <condition_variable>
 #include "nsync_cv.h"
 #include "nsync_mu.h"
+#include "tensorflow/core/platform/logging.h"
 
 namespace tensorflow {
 
@@ -35,13 +36,22 @@ static inline nsync::nsync_mu *mu_cast(mutex::external_mu_space *mu) {
 
 mutex::mutex() { nsync::nsync_mu_init(mu_cast(&mu_)); }
 
-void mutex::lock() { nsync::nsync_mu_lock(mu_cast(&mu_)); }
+void mutex::lock() {
+  //LOG(INFO) << __func__ << " " << (void*) this;
+  nsync::nsync_mu_lock(mu_cast(&mu_));
+}
 
 bool mutex::try_lock() { return nsync::nsync_mu_trylock(mu_cast(&mu_)) != 0; };
 
-void mutex::unlock() { nsync::nsync_mu_unlock(mu_cast(&mu_)); }
+void mutex::unlock() {
+  //LOG(INFO) << __func__ << " " << (void*) this;
+  nsync::nsync_mu_unlock(mu_cast(&mu_));
+}
 
-void mutex::lock_shared() { nsync::nsync_mu_rlock(mu_cast(&mu_)); }
+void mutex::lock_shared() {
+  //LOG(INFO) << __func__ << " " << (void*) this;
+  nsync::nsync_mu_rlock(mu_cast(&mu_));
+}
 
 bool mutex::try_lock_shared() {
   return nsync::nsync_mu_rtrylock(mu_cast(&mu_)) != 0;

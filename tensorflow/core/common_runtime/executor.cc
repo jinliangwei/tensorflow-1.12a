@@ -21,6 +21,8 @@ limitations under the License.
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <queue>
+#include <fstream>
 
 #include "tensorflow/core/common_runtime/costmodel_manager.h"
 #include "tensorflow/core/common_runtime/executor_factory.h"
@@ -61,6 +63,7 @@ limitations under the License.
 #include "tensorflow/core/platform/tracing.h"
 #include "tensorflow/core/platform/types.h"
 #include "tensorflow/core/util/tensor_slice_reader_cache.h"
+#include "tensorflow/core/platform/stacktrace.h"
 
 namespace tensorflow {
 namespace {
@@ -367,6 +370,8 @@ class ExecutorImpl : public Executor {
   // the overhead of constructing it for each executor instance.
   gtl::FlatMap<string, FrameInfo*> frame_info_;
 
+  std::vector<size_t> num_nodes_per_partition_;
+
   TF_DISALLOW_COPY_AND_ASSIGN(ExecutorImpl);
 };
 
@@ -663,6 +668,33 @@ Status ExecutorImpl::Initialize() {
   // Initialize PendingCounts only after item->pending_id is initialized for
   // all nodes.
   InitializePending(graph_.get(), cf_info);
+
+  int max_priority = 1;
+  for (const Node* n : graph_->nodes()) {
+    if (n->def().priority() > max_priority)
+      max_priority = n->def().priority();
+  }
+
+  //LOG(INFO) << __func__ << " " << (void*) this
+  //<< " max_priority = "
+  //          << max_priority;
+
+  num_nodes_per_partition_.resize(max_priority + 1, 0);
+  for (const Node* n : graph_->nodes()) {
+    num_nodes_per_partition_[n->def().priority()] += 1;
+    //LOG(INFO) << __func__ << " "
+    //          << (void*) this
+    //          << " node = " << n->name()
+    //          << " op = " << n->type_string()
+    //          << " priority = " << n->def().priority()
+    //          << " num_nodes_per_partition = "
+    //          << num_nodes_per_partition_[n->def().priority()]
+    //          << " device = " << n->def().device();
+    //for (const auto &input : n->def().input()) {
+    //  LOG(INFO) << __func__ << " "
+    //            << " input = " << input;
+    //}
+  }
 
   return gview_.SetAllocAttrs(graph_.get(), params_.device);
 }
@@ -1187,6 +1219,14 @@ class ExecutorState {
     }
   };
 
+  struct LowerPriorityNode {
+    bool operator() (const TaggedNode &a,
+                     const TaggedNode &b) {
+      return a.node->def().priority() > b.node->def().priority();
+    }
+  };
+
+
   // A drop-in replacement for std::deque<TaggedNode>.  We typically don't
   // have that many nodes in the ready queue, so we just use a vector and
   // don't free up memory from the queue as we consume nodes.
@@ -1267,6 +1307,14 @@ class ExecutorState {
 
   mutex mu_;
   Status status_ GUARDED_BY(mu_);
+
+  mutex schedule_mu_;
+  std::priority_queue<TaggedNode,
+                      std::vector<TaggedNode>,
+                      LowerPriorityNode> schedule_queue_;
+  int32 curr_partition_ {1};
+  size_t num_pending_ops_curr_partition_ {0};
+  size_t num_pending_ops_next_partition_ {0};
 
   // Mapping from frame name to outstanding frames. A new frame is created
   // at some iteration of an active frame. So the unique key for the new
@@ -1483,7 +1531,8 @@ void ExecutorImpl::InitializePending(const Graph* graph,
 }
 
 void ExecutorState::RunAsync(Executor::DoneCallback done) {
-  LOG(INFO) << __func__ << " Start";
+  //LOG(INFO) << __func__ << " " << (void*) this
+  //          << " " << step_id_ << " start";
   const Graph* graph = impl_->graph_.get();
   TaggedNodeSeq ready;
 
@@ -1502,6 +1551,12 @@ void ExecutorState::RunAsync(Executor::DoneCallback done) {
     DCHECK_EQ(n->in_edges().size(), 0);
     ready.push_back(TaggedNode{n, root_frame_, 0, false});
   }
+
+  num_pending_ops_curr_partition_ = impl_->num_nodes_per_partition_[1];
+  if (impl_->num_nodes_per_partition_.size() > 2) {
+    num_pending_ops_next_partition_ = impl_->num_nodes_per_partition_[2];
+  }
+
   if (ready.empty()) {
     delete this;
     done(Status::OK());
@@ -1512,7 +1567,8 @@ void ExecutorState::RunAsync(Executor::DoneCallback done) {
     // Schedule to run all the ready ops in thread pool.
     ScheduleReady(ready, nullptr);
   }
-  LOG(INFO) << __func__ << " End";
+  //LOG(INFO) << __func__ << " " << (void*) this
+  //          << " " << step_id_ << " end";
 }
 
 // State kept alive for executing an asynchronous node in another
@@ -1588,9 +1644,6 @@ bool MightTrace(const NodeItem& item,
 }
 
 void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
-  //LOG(INFO) << __func__ << " node.name = " << tagged_node.node->name()
-  //          << " type = " << tagged_node.node->type_string();
-
   const GraphView& gview = impl_->gview_;
   TaggedNodeSeq ready;
   TaggedNodeReadyQueue inline_ready;
@@ -1659,9 +1712,8 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
       nodestats::SetAllStart(stats);
     }
 
-    //LOG(INFO) << __func__ << " pop node.name = " << node->name()
-    //          << " type = " << node->type_string()
-    //          << " id = " << id << " step " << params.step_id << " "
+    //LOG(INFO) << " " << (void*) this << " Process node: " << id << " name = " << node->name()
+    //          << " step " << params.step_id << " "
     //          << SummarizeNode(*node) << (tagged_node.is_dead ? " is dead" : "")
     //          << " device: " << device->name();
 
@@ -1689,7 +1741,6 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
       s = PrepareInputs(item, first_input, &inputs, &input_device_contexts,
                         &input_alloc_attrs, &is_input_dead);
       if (!s.ok()) {
-        //LOG(INFO) << __func__ << " PrepareInputs failed";
         // Clear inputs.
         int num_inputs = item.num_inputs;
         for (int i = 0; i < num_inputs; ++i) {
@@ -1763,7 +1814,6 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
           if (completed) Finish();
         };
         nodestats::SetOpStart(stats);
-        //LOG(INFO) << __func__ << " ComputeAsync";
         device->ComputeAsync(async, &state->ctx, done);
       } else {
         // Synchronous computes.
@@ -1776,7 +1826,6 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
           const string& op_name = op_kernel->name();
           tracing::ScopedRegion region(tracing::EventCategory::kCompute,
                                        op_name);
-          //LOG(INFO) << __func__ << " ComputeSync";
           if (trace_using_annotations_) {
             // The OpKernel may create child activities (such as GPU kernel
             // launches), so use a `ScopedAnnotation` to relate these activities
@@ -2165,6 +2214,44 @@ bool ExecutorState::NodeDone(const Status& s, const Node* node,
     }
   }
 
+  {
+    mutex_lock l(schedule_mu_);
+
+    CHECK(node->def().priority() == 0 ||
+          node->def().priority() == curr_partition_ ||
+          node->def().priority() == (curr_partition_ + 1))
+        << __func__ << " " << (void*) this
+        << " node priority = " << node->def().priority()
+        << " curr_partition = " << curr_partition_;
+
+    //LOG(INFO) << __func__ << " " << (void*) this
+    //          << " node.name = "
+    //          << node->name()
+    //          << " type = " << node->type_string()
+    //          << " node.priority = " << node->def().priority()
+    //          << " num_pending_ops_curr_partition = " << num_pending_ops_curr_partition_
+    //        << " num_pending_ops_next_partition = " << num_pending_ops_next_partition_;
+
+    if (node->def().priority() == curr_partition_) {
+      num_pending_ops_curr_partition_--;
+    } else if (node->def().priority() == (curr_partition_ + 1)) {
+      num_pending_ops_next_partition_--;
+    }
+
+    while (num_pending_ops_curr_partition_ == 0 &&
+           curr_partition_ < impl_->num_nodes_per_partition_.size()) {
+      curr_partition_++;
+      //LOG(INFO) << __func__ << " " << (void*) this
+      //          << " advance to partition " << curr_partition_;
+      num_pending_ops_curr_partition_ = num_pending_ops_next_partition_;
+      if (curr_partition_ + 1 < impl_->num_nodes_per_partition_.size()) {
+        num_pending_ops_next_partition_ = impl_->num_nodes_per_partition_[curr_partition_ + 1];
+      } else {
+        num_pending_ops_next_partition_ = 0;
+      }
+    }
+  }
+
   bool abort_run = false;
   if (!s.ok()) {
     // Some error happened. This thread of computation is done.
@@ -2204,22 +2291,68 @@ bool ExecutorState::NodeDone(const Status& s, const Node* node,
 
 void ExecutorState::ScheduleReady(const TaggedNodeSeq& ready,
                                   TaggedNodeReadyQueue* inline_ready) {
-  if (ready.empty()) return;
+  std::vector<TaggedNode> to_schedule_queue;
+  {
+    mutex_lock l(schedule_mu_);
+    for (auto& tagged_node : ready) {
+      //LOG(INFO) << __func__ << " " << (void*) this
+      //          << " schedule "
+      //          << tagged_node.node->name()
+      //          << " type = " << tagged_node.node->type_string()
+      //          << " priority = " << tagged_node.node->def().priority()
+      //         << " dev = " <<tagged_node.node->def().device();
+      if (tagged_node.node->def().priority() == 0) {
+        to_schedule_queue.emplace_back(tagged_node);
+      } else {
+        schedule_queue_.push(tagged_node);
+      }
+    }
+    //LOG(INFO) << __func__ << " " << (void*) this
+    //          << " num_pending_ops_curr_partition = " << num_pending_ops_curr_partition_
+    //              << " num_pending_ops_next_partition = " << num_pending_ops_next_partition_
+    //        << " to_schedule_queue.size = " << to_schedule_queue.size()
+    //        << " schedule_queue.size = " << schedule_queue_.size()
+    //        << " curr_partition = "<< curr_partition_;
+
+    if (schedule_queue_.empty() && to_schedule_queue.empty()) return;
+    while (!schedule_queue_.empty() &&
+           schedule_queue_.top().node->def().priority() <= (curr_partition_ + 1)) {
+      auto& tagged_node = schedule_queue_.top();
+      //LOG(INFO) << __func__ << " " << (void*) this
+      //          << " to schedule " << " node = " << tagged_node.node->name()
+      //          << " priority = " << tagged_node.node->def().priority()
+      //          << " type = " << tagged_node.node->type_string()
+      //          << " curr_partition = " << curr_partition_;
+
+      to_schedule_queue.emplace_back(tagged_node);
+      CHECK(tagged_node.node->def().priority() == curr_partition_ ||
+            tagged_node.node->def().priority() == (curr_partition_ + 1))
+          << " " << (void*) this
+          << " name = " << tagged_node.node->name()
+          << " type = " << tagged_node.node->type_string()
+          << " priority = " << tagged_node.node->def().priority()
+          << " curr_partition = " << curr_partition_;
+      schedule_queue_.pop();
+    }
+  }
 
   int64 scheduled_nsec = 0;
   if (stats_collector_) {
     scheduled_nsec = nodestats::NowInNsec();
   }
+
   if (inline_ready == nullptr) {
-    // Schedule to run all the ready ops in thread pool.
-    for (auto& tagged_node : ready) {
+    for (auto& tagged_node : to_schedule_queue) {
+      // Schedule to run all the ready ops in thread pool.
       runner_([=]() { Process(tagged_node, scheduled_nsec); });
     }
     return;
   }
+
   const GraphView& gview = impl_->gview_;
   const TaggedNode* curr_expensive_node = nullptr;
-  for (auto& tagged_node : ready) {
+
+  for (auto& tagged_node : to_schedule_queue) {
     const NodeItem& item = *gview.node(tagged_node.node->id());
     if (tagged_node.is_dead || !item.kernel_is_expensive) {
       // Inline this inexpensive node.
@@ -2234,6 +2367,7 @@ void ExecutorState::ScheduleReady(const TaggedNodeSeq& ready,
       curr_expensive_node = &tagged_node;
     }
   }
+
   if (curr_expensive_node) {
     if (inline_ready->empty()) {
       // Tail recursion optimization
@@ -2392,7 +2526,6 @@ void ExecutorState::Finish() {
     // the user until the step (and its side-effects) has actually completed.
     status.Update(device->Sync());
   }
-
   delete this;
   CHECK(done_cb != nullptr);
   runner([=]() { done_cb(status); });

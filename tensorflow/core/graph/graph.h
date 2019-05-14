@@ -104,6 +104,7 @@ class Node {
   // on which the operation will run.
   void set_requested_device(const string& device);
 
+  void set_priority(int32 priority);
   // This gives the device the runtime has assigned this node to.  If
   // you want the device the user requested, use def().device() instead.
   // TODO(josh11b): Validate that the assigned_device, if not empty:

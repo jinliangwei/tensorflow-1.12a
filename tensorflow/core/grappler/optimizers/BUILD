@@ -428,6 +428,34 @@ cc_library(
     ],
 )
 
+cc_library(
+    name = "graph_partitioner",
+    srcs = [
+        "graph_partitioner.cc",
+    ],
+    hdrs = [
+        "graph_partitioner.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":graph_optimizer",
+        ":graph_rewriter",
+        ":static_schedule",
+        "//tensorflow/core:framework",
+        "//tensorflow/core:lib",
+        "//tensorflow/core:protos_all_cc",
+        "//tensorflow/core/grappler:graph_view",
+        "//tensorflow/core/grappler:grappler_item",
+        "//tensorflow/core/grappler:op_types",
+        "//tensorflow/core/grappler:utils",
+        "//tensorflow/core/grappler/clusters:virtual_cluster",
+        "//tensorflow/core/grappler/costs:graph_memory",
+        "//tensorflow/core/grappler/costs:graph_properties",
+        "//tensorflow/core/grappler/utils:topological_sort",
+        "//tensorflow/core/grappler/utils:traversal",
+    ],
+)
+
 tf_cuda_only_cc_test(
     name = "memory_optimizer_test",
     srcs = ["memory_optimizer_test.cc"],
@@ -517,6 +545,7 @@ cc_library(
         ":layout_optimizer",
         ":loop_optimizer",
         ":memory_optimizer",
+	":graph_partitioner",
         ":model_pruner",
         ":pin_to_host_optimizer",
         ":remapper",

@@ -22,6 +22,8 @@ limitations under the License.
 #include "tensorflow/core/grappler/costs/graph_properties.h"
 #include "tensorflow/core/grappler/grappler_item.h"
 
+#include <deque>
+
 namespace tensorflow {
 namespace grappler {
 
@@ -35,9 +37,25 @@ class GraphMemory {
     Costs::Duration allocation_time;
     Costs::Duration deallocation_time;
   };
+
   struct MemoryUsage {
     int64 used_memory;
     std::vector<LiveTensor> live_tensors;
+  };
+
+  struct Event {
+   Event(int64 _timestamp, bool _allocated,
+         const GraphMemory::LiveTensor* _tensor)
+   : timestamp(_timestamp), allocated(_allocated), tensor(_tensor) {}
+
+    int64 timestamp;
+    bool allocated;
+    const GraphMemory::LiveTensor* tensor;
+    int64 memory_used {0};
+
+    bool operator<(const Event& other) const {
+      return timestamp < other.timestamp;
+    }
   };
 
   explicit GraphMemory(const GrapplerItem& item)
@@ -46,6 +64,10 @@ class GraphMemory {
   Status InferStatically(
       const std::unordered_map<string, DeviceProperties>& devices);
   Status InferDynamically(Cluster* cluster);
+
+  Status InferStaticallyAndGetRunMetadata(
+      const std::unordered_map<string, DeviceProperties>& devices,
+      RunMetadata *metadata);
 
   // Worst case memory usage in bytes, or -1 if the usage is unknown. If there
   // are multiple devices, returns the highest per device memory usage.
@@ -58,6 +80,14 @@ class GraphMemory {
       return unknown_usage_;
     }
     return it->second;
+  }
+
+  bool GetEventsForDevice(const std::string &device,
+                          std::vector<Event>* events) const {
+    auto event_iter = events_per_device_.find(device);
+    if (event_iter == events_per_device_.end()) return false;
+    *events = event_iter->second;
+    return true;
   }
 
  private:
@@ -73,6 +103,9 @@ class GraphMemory {
   std::unordered_map<string, int64> worst_case_memory_usage_;
   std::unordered_map<string, MemoryUsage> peak_usage_;
   const MemoryUsage unknown_usage_;
+
+  std::unordered_map<string, std::deque<LiveTensor>> live_tensors_per_device_;
+  std::unordered_map<string, std::vector<Event>> events_per_device_;
 };
 
 }  // end namespace grappler

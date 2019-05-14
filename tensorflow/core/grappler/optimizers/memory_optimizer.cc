@@ -20,6 +20,7 @@ limitations under the License.
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+#include <stack>
 
 #include "tensorflow/core/framework/attr_value.pb.h"
 #include "tensorflow/core/framework/node_def.pb.h"
@@ -417,8 +418,6 @@ void RecomputeSubgraph(
 void RecomputationRewritingPass(RewriterConfig::MemOptType optimization_level,
                                 const string& recomputation_targets_name_scope,
                                 GraphDef* graph, const GrapplerItem& item) {
-  //LOG(INFO) << __func__ << " optimization_level = " << static_cast<int>(optimization_level);
-
   if (optimization_level != RewriterConfig::RECOMPUTATION_HEURISTICS &&
       optimization_level != RewriterConfig::HEURISTICS &&
       optimization_level != RewriterConfig::MANUAL) {
@@ -493,7 +492,6 @@ void RecomputationRewritingPass(RewriterConfig::MemOptType optimization_level,
 }
 
 bool SchedulingPass(Cluster* cluster, GrapplerItem* item) {
-  //LOG(INFO) << __func__;
   // Look for AddN nodes (and equivalent) and record input names.
   GraphView view(&item->graph);
 
@@ -514,8 +512,6 @@ bool SchedulingPass(Cluster* cluster, GrapplerItem* item) {
       }
     }
   }
-
-  //LOG(INFO) << __func__ << " addn_list.empty() = " << addn_list.empty();
 
   if (addn_list.empty()) {
     return false;
@@ -699,160 +695,6 @@ bool SchedulingPass(Cluster* cluster, GrapplerItem* item) {
   return updated_graph;
 }
 
-Status BuildSwapPair(NodeDef* node, int input_to_swap,
-                     const std::unordered_map<string, const NodeDef*>& name_map,
-                     GraphDef* graph,
-                     std::pair<NodeDef*, NodeDef*>* swap_pair) {
-  const OpDef* op_def;
-  TF_RETURN_IF_ERROR(OpRegistry::Global()->LookUpOpDef(node->op(), &op_def));
-  DataType input_type;
-  TF_RETURN_IF_ERROR(
-      InputTypeForNode(*node, *op_def, input_to_swap, &input_type));
-  if (IsRefType(input_type)) {
-    return errors::InvalidArgument("Can't swap input ", input_to_swap,
-                                   " of node ", node->name(),
-                                   " since it expects a reference");
-  }
-
-  string tensor_to_swap = strings::StrCat(node->name(), "_", input_to_swap);
-  string swap_out_name = strings::StrCat("swap_out_", tensor_to_swap);
-  string swap_in_name = strings::StrCat("swap_in_", tensor_to_swap);
-  if (name_map.find(swap_out_name) != name_map.end() ||
-      name_map.find(swap_in_name) != name_map.end()) {
-    return errors::InvalidArgument("Input ", input_to_swap, " of node ",
-                                   node->name(), " is already swapped");
-  }
-
-  // Force the tensor to be copied to cpu.
-  NodeDef* swap_out_node = graph->add_node();
-  swap_out_node->set_name(swap_out_name);
-  swap_out_node->set_op("_CopyFromGpuToHost");
-  // Force the tensor to be restored to the device.
-  NodeDef* swap_in_node = graph->add_node();
-  swap_in_node->set_name(swap_in_name);
-  swap_in_node->set_op("_CopyFromHostToGpu");
-  *swap_in_node->add_input() = swap_out_node->name();
-
-  // Colocate the swap_out_ and swap_in_ nodes with the node itself.
-  swap_out_node->set_device(node->device());
-  //LOG(INFO) << __func__ << " swap_out, swap_in device = " << node->device();
-  swap_in_node->set_device(node->device());
-  string coloc_group = strings::StrCat("loc@", tensor_to_swap);
-  (*swap_out_node->mutable_attr())["_class"].mutable_list()->add_s(coloc_group);
-  (*swap_in_node->mutable_attr())["_class"].mutable_list()->add_s(coloc_group);
-  (*node->mutable_attr())["_class"].mutable_list()->add_s(coloc_group);
-
-  (*swap_in_node->mutable_attr())["T"].set_type(input_type);
-  (*swap_out_node->mutable_attr())["T"].set_type(input_type);
-  *swap_pair = std::make_pair(swap_out_node, swap_in_node);
-
-  return Status::OK();
-}
-
-static int64 EstimateSize(const OpInfo::TensorProperties& t) {
-  DataType dtype = t.dtype();
-  int64 size = DataTypeSize(dtype);
-  TensorShapeProto shape = t.shape();
-  if (shape.unknown_rank()) {
-    // Can't infer the size if the rank is unknown. It has to be at least a
-    // scalar though.
-    return size;
-  }
-  // If one of the dimensions is unknown statically, assume it's at least one.
-  for (int i = 0; i < shape.dim_size(); ++i) {
-    if (shape.dim(i).size() < 0) {
-      shape.mutable_dim(i)->set_size(1);
-    }
-  }
-  int64 num_elems = TensorShape(shape).num_elements();
-  return num_elems * size;
-}
-
-struct SwapInfo {
-  std::vector<int> inputs_to_swap;
-  Costs::NanoSeconds time_to_swap = 0;
-};
-
-static const NodeDef* FindSwapInTrigger(
-    const NodeDef* node, const SwapInfo& swap_info,
-    const std::unordered_map<string, const NodeDef*>& name_map,
-    const std::unordered_map<const NodeDef*, Costs::NanoSeconds>&
-        execution_times) {
-  // max_trigger_time stores the time before which the swap operation needs to
-  // be started in order to load the data back onto the accelerator without
-  // delaying the downstream computation.
-  Costs::NanoSeconds max_trigger_time(0);
-  std::set<string> possible_inputs;
-  for (int i = 0; i < node->input_size(); ++i) {
-    const string input_node_name = NodeName(node->input(i));
-    auto it1 = name_map.find(input_node_name);
-    if (it1 == name_map.end()) {
-      return nullptr;
-    }
-    const NodeDef* input_node = it1->second;
-
-    auto it2 = execution_times.find(input_node);
-    if (it2 == execution_times.end()) {
-      return nullptr;
-    }
-    max_trigger_time = std::max(max_trigger_time, it2->second);
-    possible_inputs.insert(input_node_name);
-  }
-
-  for (const int i : swap_info.inputs_to_swap) {
-    const string input_node_name = NodeName(node->input(i));
-    possible_inputs.erase(input_node_name);
-  }
-  if (possible_inputs.empty()) {
-    return nullptr;
-  }
-
-  max_trigger_time -= swap_info.time_to_swap;
-
-  std::map<Costs::NanoSeconds, const NodeDef*> candidates;
-  std::set<string> already_processed;
-
-  while (!possible_inputs.empty()) {
-    const string input_node_name = *possible_inputs.begin();
-    possible_inputs.erase(possible_inputs.begin());
-    already_processed.insert(input_node_name);
-    auto it1 = name_map.find(input_node_name);
-    if (it1 == name_map.end()) {
-      return nullptr;
-    }
-    const NodeDef* input_node = it1->second;
-    // Don't jump over frames, since adding a control dependency from one frame
-    // to the next isn't supported. Don't go through branches, since we don't
-    // know whether they'll be executed or not.
-    if (ModifiesFrameInfo(*input_node) || IsSwitch(*input_node) ||
-        IsMerge(*input_node)) {
-      continue;
-    }
-    auto it2 = execution_times.find(input_node);
-    if (it2 == execution_times.end()) {
-      return nullptr;
-    }
-    if (it2->second < max_trigger_time) {
-      candidates[it2->second] = input_node;
-    } else {
-      for (const string& fanin : input_node->input()) {
-        string name = NodeName(fanin);
-        if (already_processed.find(name) == already_processed.end()) {
-          possible_inputs.insert(name);
-        }
-      }
-    }
-  }
-
-  // Select the candidate that will execute last, since we want to swap the data
-  // back at the last minute while still allowing enough time for data to be
-  // swapped back timely to feed the downstream nodes.
-  if (!candidates.empty()) {
-    return candidates.rbegin()->second;
-  }
-  return nullptr;
-}
-
 static bool IsSwappable(const GraphView& graph, GraphView::OutputPort output) {
   const NodeDef& node = *output.node;
   // There is no point in swapping out persistent tensors, since the tensor will
@@ -865,10 +707,12 @@ static bool IsSwappable(const GraphView& graph, GraphView::OutputPort output) {
   if (!OpRegistry::Global()->LookUpOpDef(node.op(), &op_def).ok()) {
     return false;
   }
+
   DataType dtype;
   if (!OutputTypeForNode(node, *op_def, output.port_id, &dtype).ok()) {
     return false;
   }
+
   // References can only refer to persistent memory: therefore the node isn't
   // swappable.
   if (IsRefType(dtype)) {
@@ -882,44 +726,14 @@ static bool IsSwappable(const GraphView& graph, GraphView::OutputPort output) {
     GraphView::InputPort input;
     input.node = output.node;
     input.port_id = 0;
+
     GraphView::OutputPort fanin = graph.GetRegularFanin(input);
+    CHECK(fanin.node);
     if (fanin.node->device() == node.device()) {
       return IsSwappable(graph, fanin);
     }
   }
   return true;
-}
-
-static NodeDef* FindSwapOutTrigger(
-    const NodeDef* node, int input_id, const GraphView& view,
-    const std::unordered_map<const NodeDef*, Costs::NanoSeconds>&
-        execution_times) {
-  // Find the output port that generated the tensor to swap.
-  GraphView::InputPort swap;
-  swap.node = const_cast<NodeDef*>(node);
-  swap.port_id = input_id;
-  GraphView::OutputPort generator = view.GetRegularFanin(swap);
-  if (!generator.node) {
-    return nullptr;
-  }
-
-  const std::unordered_set<GraphView::InputPort, GraphView::HashPort>& fanout =
-      view.GetFanout(generator);
-  NodeDef* trigger = nullptr;
-  Costs::NanoSeconds earliest_fanout(Costs::NanoSeconds::infinity());
-
-  for (const auto& port : fanout) {
-    if (port.node == node) {
-      continue;
-    }
-    auto it = execution_times.find(port.node);
-    if (it != execution_times.end() && it->second < earliest_fanout) {
-      earliest_fanout = it->second;
-      trigger = port.node;
-    }
-  }
-
-  return trigger;
 }
 
 static bool IsSwappable(GraphView::InputPort input) {
@@ -937,357 +751,286 @@ static bool IsSwappable(GraphView::InputPort input) {
 
   return !IsRefType(dtype);
 }
+/*
+void PartitionGraph(GraphDef* graph,
+                    const std::unordered_map<string, DeviceProperties> &devices,
+                    std::unordered_map<int32, std::vector<NodeDef*>> *node_partitions) {
+  const size_t kPartitionSize = 10;
 
-struct MemInfo {
-  GraphView::OutputPort port;
-  int64 memory_used;
-  std::vector<GraphView::InputPort> uses_left;
-  double fitness;
+  SimpleGraphView graph_view;
+  CHECK(graph_view.Initialize(*graph).ok());
 
-  bool operator<(const MemInfo& other) const { return fitness < other.fitness; }
-};
-
-static bool IdentifySwappingCandidates(
-    Cluster* cluster, GrapplerItem* item, std::unordered_set<string>* skip_list,
-    std::unordered_map<NodeDef*, SwapInfo>* nodes_to_swap) {
-  GraphMemory memory(*item);
-  const std::unordered_map<string, DeviceProperties>& devices =
-      cluster->GetDevices();
-  Status s = memory.InferStatically(devices);
-  if (!s.ok()) {
-    VLOG(1) << "Failed to infer memory usage: " << s.error_message();
-    return false;
+  size_t num_devices = devices.size();
+  std::vector<int> per_device_num_ops_curr_partition(num_devices, 0);
+  std::unordered_map<string, int> device_name_to_index_map;
+  int i = 0;
+  for (const auto &device_pair : devices) {
+    device_name_to_index_map[device_pair.first] = i++;
   }
 
-  bool updated_graph = false;
-  for (const auto& device : devices) {
-    const string& name = device.first;
-    const DeviceProperties& prop = device.second;
-    LOG(INFO) << __func__ << " name = " << name
-              << " prop.type() = " << prop.type()
-              << " memory_size = " << prop.memory_size();
-    if (prop.type() != "GPU") {
-      continue;
-    }
-    if (prop.memory_size() <= 0) {
-      VLOG(1) << "Peak memory usage unknown for device " << name;
-      continue;
+  std::vector<std::stack<int>> per_device_ready_nodes(num_devices);
+  std::vector<int> num_ready_inputs(graph_view.num_nodes(), 0);
+
+  for (int i = 0; i < graph_view.num_nodes(); i++) {
+    if (graph_view.inputs(i).empty()) {
+      const string &device_name = graph_view.node(i).device();
+      int32 device_index = device_name_to_index_map[device_name];
+      per_device_ready_nodes[device_index].push(i);
     }
 
-    const GraphMemory::MemoryUsage& mem_usage = memory.GetPeakMemoryUsage(name);
-    LOG(INFO) << __func__ << " device.name = " << name
-              << " peak_memory_usage = " << mem_usage.used_memory;
-
-    if (mem_usage.used_memory <= prop.memory_size()) {
-      continue;
-    }
-    int64 required_savings = mem_usage.used_memory - prop.memory_size();
-
-    std::unordered_map<string, Costs::NanoSeconds> op_completion_times;
-    {
-      VirtualCluster vcluster(cluster->GetDevices());
-      if (!vcluster.Provision().ok()) {
-        return false;
-      }
-      if (!vcluster.Initialize(*item).ok()) {
-        return false;
-      }
-      RunMetadata metadata;
-      Status s = vcluster.Run(item->graph, item->feed, item->fetch, &metadata);
-      if (!s.ok() && s.code() != error::RESOURCE_EXHAUSTED) {
-        return false;
-      }
-
-      for (const auto& dev_stats : metadata.step_stats().dev_stats()) {
-        LOG(INFO) << __func__ << " device_stats.devce = " << dev_stats.device();
-        for (const auto& node_stats : dev_stats.node_stats()) {
-          Costs::NanoSeconds exec_time =
-              Costs::NanoSeconds(1) +
-              Costs::MicroSeconds(node_stats.all_start_micros() +
-                                  node_stats.op_end_rel_micros());
-          LOG(INFO) << __func__ << " node = " << node_stats.node_name()
-                    << " exec_time = " << exec_time;
-          op_completion_times.emplace(node_stats.node_name(), exec_time);
+    if (IsMerge(graph_view.node(i))) {
+      for (int input : graph_view.inputs(i)) {
+        if (IsNextIteration(graph_view.node(input))) {
+          num_ready_inputs[i]++;
         }
-      }
-    }
-
-    Costs::Duration peak_time = -1;
-    for (const auto& live_tensor : mem_usage.live_tensors) {
-      if (live_tensor.allocation_time > peak_time) {
-        peak_time = live_tensor.allocation_time;
-      }
-    }
-
-    std::vector<MemInfo> mem_state;
-
-    GraphView graph(&item->graph);
-    for (const auto& live_tensor : mem_usage.live_tensors) {
-      LOG(INFO) << __func__ << " tensor.node = " << live_tensor.node;
-      if (live_tensor.memory_used <= 1024) {
-        // Don't bother with small tensors.
-        LOG(INFO) << __func__ << " skip small tensors";
-        continue;
-      }
-      if (live_tensor.deallocation_time - live_tensor.allocation_time <=
-          Costs::Duration(1e6)) {
-        // Not enough time to swap.
-        VLOG(1) << "Not enough time to swap: skipping " << live_tensor.node;
-        LOG(INFO) << "Not enough time to swap: skipping " << live_tensor.node;
-        continue;
-      }
-
-      if (skip_list->find(live_tensor.node) != skip_list->end()) {
-        LOG(INFO) << __func__ << " skip tensor generated from node " << live_tensor.node;
-        continue;
-      }
-      GraphView::OutputPort port =
-          graph.GetOutputPort(live_tensor.node, live_tensor.output_id);
-      if (!IsSwappable(graph, port)) {
-        LOG(INFO) << __func__ << " output port not swappable, node = " << live_tensor.node;
-        continue;
-      }
-      MemInfo mem_info;
-      mem_info.port = port;
-      mem_info.memory_used = live_tensor.memory_used;
-      Costs::Duration allocation_time = live_tensor.allocation_time;
-      Costs::Duration earliest_use(Costs::Duration::infinity());
-      bool valid = true;
-      for (GraphView::InputPort input : graph.GetFanout(port)) {
-        // Get execution time.
-        auto it = op_completion_times.find(input.node->name());
-        if (it == op_completion_times.end()) {
-          LOG(INFO) << __func__ << " no completion time";
-          valid = false;
-          break;
-        }
-        if (it->second <= peak_time) {
-          continue;
-        }
-
-        auto* node = input.node;
-        auto device = node->device();
-        auto device_iter = devices.find(device);
-        if (device_iter == devices.end() ||
-            device_iter->second.type() != "GPU") {
-          continue;
-        }
-
-        if (skip_list->find(input.node->name()) != skip_list->end()) {
-          LOG(INFO) << __func__ << " skip input node, name = " << input.node->name();
-          valid = false;
-          break;
-        }
-        string input_name =
-            strings::StrCat(input.node->name(), ":", input.port_id);
-        if (skip_list->find(input_name) != skip_list->end()) {
-          LOG(INFO) << __func__ << " skip input port, name = " << input_name;
-          valid = false;
-          break;
-        }
-
-        if (!IsSwappable(input)) {
-          LOG(INFO) << __func__ << " not swappable";
-          valid = false;
-          break;
-        }
-
-        // Set earliest use time that's after peak.
-        mem_info.uses_left.emplace_back(input);
-        earliest_use = std::min(earliest_use, it->second);
-      }
-      LOG(INFO) << __func__ << " valid = " << valid;
-      if (valid && !mem_info.uses_left.empty()) {
-        // Compute the fitness: we need the tensor to be generated way away of
-        // the time of peak memory usage (to ensure there is enough time to swap
-        // it out). We also need to ensure it's used way after the peak time, to
-        // ensure that swapping the tensor back in won't recreate the memory
-        // bottleneck. Last but not least, we want the tensor to have as few
-        // remaining uses as possible.
-        //
-        // Note that we must perform the arithmetic inexactly as "double", since
-        // the values do not fit into any integral type.
-        mem_info.fitness =
-            MathUtil::IPow<double>((earliest_use - peak_time).count(), 2) /
-            MathUtil::IPow<double>(mem_info.uses_left.size(), 2) +
-            MathUtil::IPow<double>((allocation_time - peak_time).count(), 2);
-        mem_info.fitness = -mem_info.fitness;
-        mem_state.push_back(mem_info);
-      }
-    }
-
-    // Sort by fitness
-    std::sort(mem_state.begin(), mem_state.end());
-
-    for (const MemInfo& mem_info : mem_state) {
-      for (const GraphView::InputPort fanout_to_swap : mem_info.uses_left) {
-        VLOG(1) << "Will swap fanout " << fanout_to_swap.node->name() << ":"
-                << fanout_to_swap.port_id << " of tensor "
-                << mem_info.port.node->name() << ":" << mem_info.port.port_id
-                << " of size " << mem_info.memory_used;
-
-        LOG(INFO) << "Will swap fanout " << fanout_to_swap.node->name() << ":"
-                  << fanout_to_swap.port_id << " of tensor "
-                  << mem_info.port.node->name() << ":" << mem_info.port.port_id
-                  << " of size " << mem_info.memory_used
-                  << " device = " << fanout_to_swap.node->device()
-                  << " node_ptr = " << (void*) fanout_to_swap.node;
-
-        (*nodes_to_swap)[fanout_to_swap.node].inputs_to_swap.push_back(
-            fanout_to_swap.port_id);
-      }
-      required_savings -= mem_info.memory_used;
-      LOG(INFO) << __func__ << " required savings = " << required_savings;
-      updated_graph = true;
-      if (required_savings < 0) {
-        LOG(INFO) << __func__ << " required savings = " << required_savings << " break";
-        break;
       }
     }
   }
-  LOG(INFO) << __func__ << " updated_graph = " << updated_graph;
-  return updated_graph;
+
+  int32 partition_id = 1;
+  bool executed_all = false;
+  while (!executed_all) {
+    executed_all = true;
+    for (int dev_index = 0; dev_index < per_device_ready_nodes.size();
+         dev_index++) {
+      if (per_device_num_ops_curr_partition[dev_index] == kPartitionSize) {
+        partition_id++;
+        for (auto& num_ops : per_device_num_ops_curr_partition) num_ops = 0;
+      }
+      auto &ready_node_stack = per_device_ready_nodes[dev_index];
+      if (!ready_node_stack.empty()) {
+        int ready_node = ready_node_stack.top();
+        ready_node_stack.pop();
+        executed_all = false;
+        NodeDef* node = graph->mutable_node(ready_node);
+        node->set_priority(partition_id);
+        (*node_partitions)[partition_id].emplace_back(node);
+        per_device_num_ops_curr_partition[dev_index] += 1;
+
+        for (int fanout : graph_view.outputs(ready_node)) {
+          ++num_ready_inputs[fanout];
+
+          if (num_ready_inputs[fanout] == graph_view.inputs(fanout).size()) {
+            const string& fanout_device = graph_view.node(fanout).device();
+            int fanout_device_index = device_name_to_index_map[fanout_device];
+            per_device_ready_nodes[fanout_device_index].push(fanout);
+          }
+        }
+      }
+    }
+  }
 }
 
+void AddSwapNodesForOneNode(GraphDef* graph,
+                            NodeDef* generator,
+                            std::unordered_map<int32, std::vector<GraphView::InputPort>
+                            >* output_port_to_uses_after_swap,
+                            const std::unordered_map<int32, std::vector<NodeDef*>>& node_partitions) {
+
+
+  const OpDef* op_def;
+  CHECK(OpRegistry::Global()->LookUpOpDef(generator->op(), &op_def).ok());
+
+  int32 generator_partition = generator->priority();
+
+  for (auto& output_port_to_uses_after_swap_pair :
+           (*output_port_to_uses_after_swap)) {
+    int32 output_port = output_port_to_uses_after_swap_pair.first;
+    DataType output_type;
+    CHECK(OutputTypeForNode(*generator, *op_def, output_port,
+                            &output_type).ok());
+    CHECK(!IsRefType(output_type)) << " node = " << generator->name();
+
+    string tensor_to_swap = strings::StrCat(generator->name(), "_", output_port);
+    string swap_out_name = strings::StrCat("swap_out_", tensor_to_swap);
+    string swap_in_name_base = strings::StrCat("swap_in_", tensor_to_swap);
+
+    // Force the tensor to be copied to cpu.
+    NodeDef* swap_out_node = graph->add_node();
+    swap_out_node->set_name(swap_out_name);
+    swap_out_node->set_op("_CopyFromGpuToHost");
+    swap_out_node->set_device(generator->device());
+    swap_out_node->set_priority(generator->priority());
+    swap_out_node->add_input(strings::StrCat(generator->name(), ":", output_port));
+
+    string coloc_group = strings::StrCat("loc@", tensor_to_swap);
+    (*swap_out_node->mutable_attr())["_class"].mutable_list()->add_s(coloc_group);
+    (*generator->mutable_attr())["_class"].mutable_list()->add_s(coloc_group);
+    (*swap_out_node->mutable_attr())["T"].set_type(output_type);
+
+    auto& uses_after_swap = output_port_to_uses_after_swap_pair.second;
+    std::sort(uses_after_swap.begin(),
+              uses_after_swap.end(),
+              [&] (const GraphView::InputPort& a, const GraphView::InputPort& b) {
+                return a.node->priority() < b.node->priority();
+              });
+
+    NodeDef* prev_input_node = nullptr;
+    NodeDef* prev_swap_in_node = nullptr;
+    for (const auto& input_port : uses_after_swap) {
+      NodeDef* input_node = input_port.node;
+      int32 input_node_partition = input_node->priority();
+      int32 port_id = input_port.port_id;
+      NodeDef *swap_in_node = nullptr;
+
+      if (!prev_input_node ||
+          (prev_input_node && (prev_input_node->priority() + 1 < input_node->priority()))) {
+        string swap_in_name = strings::StrCat(swap_in_name_base, "_", input_node->name(),
+                                              "_", port_id);
+        swap_in_node = graph->add_node();
+        swap_in_node->set_name(swap_in_name);
+        swap_in_node->set_op("_CopyFromHostToGpu");
+        swap_in_node->add_input(swap_out_name);
+        swap_in_node->set_device(generator->device());
+        swap_in_node->set_priority(std::max(input_node->priority() - 1, 0));
+
+        if (prev_input_node) {
+          swap_in_node->add_input(strings::StrCat("^", prev_input_node->name()));
+        }
+        prev_swap_in_node = swap_in_node;
+
+        (*swap_in_node->mutable_attr())["_class"].mutable_list()->add_s(coloc_group);
+        (*swap_in_node->mutable_attr())["T"].set_type(output_type);
+
+      } else {
+        CHECK(prev_input_node->priority() == input_node->priority() ||
+              prev_input_node->priority() + 1 == input_node->priority());
+        swap_in_node = prev_swap_in_node;
+      }
+
+      prev_input_node = input_node;
+      *(input_node->mutable_input(port_id)) = swap_in_node->name();
+    }
+  }
+}
+
+/*
+  void SwapTensors(const GraphView &view,
+                 const std::unordered_map<int32, std::vector<NodeDef*>>& node_partitions,
+                 GraphDef* graph) {
+  using OutputPortToUsesAfterSwapMap = std::unordered_map<int32, std::vector<GraphView::InputPort>>;
+  std::unordered_map<NodeDef*, OutputPortToUsesAfterSwapMap> node_to_swap_map;
+
+  for (const auto &node_partitions_pair : node_partitions) {
+    int32 partition_id = node_partitions_pair.first;
+    const std::vector<NodeDef*>& node_vec = node_partitions_pair.second;
+    for (NodeDef* node : node_vec) {
+      if (node->op() == "_CopyFromHostToGpu" || node->op() == "_CopyFromGpuToHost") continue;
+      DeviceNameUtils::ParsedName parsed_device_name;
+      DeviceNameUtils::ParseFullName(node->device(), &parsed_device_name);
+      if (parsed_device_name.type != "GPU" &&
+          parsed_device_name.type != "gpu") continue;
+
+      auto fanout_edge_set = view.GetFanoutEdges(*node, false);
+      OutputPortToUsesAfterSwapMap output_port_to_uses_after_swap;
+
+      for (const auto &fanout_edge : fanout_edge_set) {
+        GraphView::InputPort target = fanout_edge.tgt;
+        NodeDef* dst_node = target.node;
+        int partition_distance = 2;
+        if (dst_node->device() != node->device()) continue;
+
+        int32 dst_node_partition = dst_node->priority();
+
+        if (dst_node_partition - partition_id > partition_distance) {
+          GraphView::OutputPort source = fanout_edge.src;
+          output_port_to_uses_after_swap[source.port_id].emplace_back(target);
+        }
+      }
+
+      for (auto output_port_to_uses_after_swap_iter = output_port_to_uses_after_swap.begin();
+           output_port_to_uses_after_swap_iter != output_port_to_uses_after_swap.end();) {
+        int32 output_port = output_port_to_uses_after_swap_iter->first;
+        GraphView::OutputPort output(node, output_port);
+        if(!IsSwappable(view, output)) {
+          output_port_to_uses_after_swap.erase(output_port_to_uses_after_swap_iter++);
+        } else {
+          output_port_to_uses_after_swap_iter++;
+        }
+      }
+      if (output_port_to_uses_after_swap.size() > 0) {
+        node_to_swap_map.emplace(
+            std::make_pair(node, output_port_to_uses_after_swap));
+      }
+    }
+  }
+
+  for (auto& node_to_swap_map_pair : node_to_swap_map) {
+    NodeDef* node = node_to_swap_map_pair.first;
+    auto& output_port_to_uses_after_swap = node_to_swap_map_pair.second;
+    AddSwapNodesForOneNode(graph,
+                           node,
+                           &output_port_to_uses_after_swap,
+                           node_partitions);
+
+  }
+  } */
+  /*
 bool SwappingPass(RewriterConfig::MemOptType optimization_level,
-                  Cluster* cluster, GrapplerItem* item,
-                  std::unordered_set<string>* skip_list) {
-  LOG(INFO) << __func__;
-  std::unordered_map<NodeDef*, SwapInfo> nodes_to_swap;
+                  Cluster* cluster, GrapplerItem* item) {
+  GraphView view(&item->graph);
+  const auto& fetch_vec = item->fetch;
+
   if (optimization_level == RewriterConfig::DEFAULT_MEM_OPT ||
       optimization_level == RewriterConfig::SWAPPING_HEURISTICS ||
       optimization_level == RewriterConfig::HEURISTICS) {
-    // Use heuristics to figure out what needs to be swapped;
-    IdentifySwappingCandidates(cluster, item, skip_list, &nodes_to_swap);
-  }
-  // Look for manual annotatations in the graph.
-  for (auto& node : *item->graph.mutable_node()) {
-    if (node.attr().count("_swap_to_host") != 0) {
-      LOG(INFO) << __func__ << " node: " << node.name()
-                << " type: " << node.op()
-                << " _swap_to_host-count = " << node.attr().count("_swap_to_host");
-      SwapInfo& swap_info = nodes_to_swap[&node];
-      const AttrValue& val = node.attr().at("_swap_to_host");
-      if (val.has_list()) {
-        for (int64 input_id : val.list().i()) {
-          swap_info.inputs_to_swap.push_back(input_id);
-        }
-      } else {
-        int64 input_id = val.i();
-        swap_info.inputs_to_swap.push_back(input_id);
+    GraphMemory memory(*item);
+    const std::unordered_map<string, DeviceProperties>& devices = cluster->GetDevices();
+
+    RunMetadata metadata;
+    Status s = memory.InferStaticallyAndGetRunMetadata(devices, &metadata);
+    if (!s.ok()) {
+      VLOG(1) << "Failed to infer memory usage: " << s.error_message();
+      return false;
+    }
+
+    bool need_swap = false;
+    for (const auto& device : devices) {
+      const DeviceProperties& prop = device.second;
+
+      if (prop.type() != "GPU") continue;
+      if (prop.memory_size() <= 0) continue;
+
+      const string& device_name = device.first;
+      const GraphMemory::MemoryUsage& mem_usage = memory.GetPeakMemoryUsage(device_name);
+
+      if (prop.memory_size() <= mem_usage.used_memory) {
+        need_swap = true;
+        break;
       }
     }
-  }
-  LOG(INFO) << "nodes_to_swap.empty() = " << nodes_to_swap.empty();
-  if (nodes_to_swap.empty()) {
-    // Nothing to do.
-    return false;
+
+    std::unordered_map<int32, std::vector<NodeDef*>> node_partitions;
+    PartitionGraph(&(item->graph),
+                   devices,
+                   &node_partitions);
+
+    SwapTensors(view,
+                node_partitions,
+                &item->graph);
   }
 
-  // Estimate the size of the data to swap for each node.
-  GraphProperties properties(*item);
-  if (!properties.InferStatically(true).ok()) {
-    return false;
-  }
-  for (auto& swap : nodes_to_swap) {
-    const NodeDef* node = swap.first;
-    LOG(INFO) << __func__ << " node_swap.name = " << node->name()
-              << " device = " << node->device()
-              << " node_ptr = " << (void*) node;
-    const std::vector<OpInfo::TensorProperties>& props =
-        properties.GetInputProperties(node->name());
-    SwapInfo& swap_info = swap.second;
-    int64 bytes_to_swap = 0;
-    for (int64 input_id : swap_info.inputs_to_swap) {
-      const OpInfo::TensorProperties& t = props[input_id];
-      bytes_to_swap += EstimateSize(t);
+  GraphView new_view(&item->graph);
+  for (const auto &node : item->graph.node()) {
+    NodeDef* node_def = new_view.GetNode(node.name());
+    LOG(INFO) << __func__ << " node = " << node_def->name()
+              << " num_inputs = " << node_def->input_size()
+              << " device = " << node_def->device()
+              << "  op_type = " << node_def->op()
+              << " priority = " << node_def->priority();
+    for (auto &fanout : new_view.GetFanouts(*node_def, true)) {
+      LOG(INFO) << __func__ << " fanout = " << fanout.node->name()
+                << " device = " << fanout.node->device()
+                << " priority = " << fanout.node->priority();
     }
-    // Let's assume we're going to swap over PCIe running at 16 GBps.
-    swap_info.time_to_swap = bytes_to_swap / 16;
-  }
-
-  std::unordered_map<const NodeDef*, Costs::NanoSeconds> execution_times;
-  if (!EstimateEarliestExecutionTimes(*item, cluster, &execution_times).ok()) {
-    return false;
-  }
-
-  std::unordered_map<string, const NodeDef*> name_map;
-  for (const auto& node : item->graph.node()) {
-    name_map[node.name()] = &node;
-  }
-  GraphView view(&item->graph);
-
-  bool updated_graph = false;
-
-  for (auto& swap : nodes_to_swap) {
-    NodeDef* node = swap.first;
-    const SwapInfo& swap_info = swap.second;
-    if (skip_list->find(node->name()) != skip_list->end()) {
-      continue;
-    }
-
-    // Make sure the tensor isn't swapped back in right away: look for node that
-    // will execute just before we need to swap the data back, and add a control
-    // dependency from that node to the swap node.
-    const NodeDef* in_trigger =
-        FindSwapInTrigger(node, swap_info, name_map, execution_times);
-    // If we failed, don't attempt to reprocess this node in a subsequent pass.
-    if (!in_trigger) {
-      skip_list->insert(node->name());
-      continue;
-    }
-
-    // Swap all the tensors that are marked with the 'swap_to_host' attribute.
-    for (int input_id : swap_info.inputs_to_swap) {
-      string input_name = strings::StrCat(node->name(), ":", input_id);
-      if (skip_list->find(input_name) != skip_list->end()) {
-        continue;
-      } else {
-        // Don't attempt to reprocess this input in a subsequent pass.
-        skip_list->insert(input_name);
-      }
-
-      // Make sure the tensor is swapped out quickly: look for node that
-      // will execute just after the tensor is generated and add a control
-      // dependency from the swap out node to that node.
-      NodeDef* out_trigger =
-          FindSwapOutTrigger(node, input_id, view, execution_times);
-      if (!out_trigger) {
-        continue;
-      }
-
-      std::pair<NodeDef*, NodeDef*> swap_nodes;
-      if (!BuildSwapPair(node, input_id, name_map, &item->graph, &swap_nodes)
-               .ok()) {
-        continue;
-      }
-      updated_graph = true;
-      LOG(INFO) << __func__ << " added swapping nodes for node "
-                << node->name()
-                << " op = " << node->op()
-                << " on device " << node->device()
-                << " first(out).name: " << swap_nodes.first->name()
-                << " .op: " << swap_nodes.first->op()
-                << " .device: " << swap_nodes.first->device()
-                << " second(in).name: " << swap_nodes.second->name()
-                << " .op: " << swap_nodes.second->op()
-                << " .device: " << swap_nodes.second->device();
-
-      *swap_nodes.first->add_input() = node->input(input_id);
-      *node->mutable_input(input_id) = swap_nodes.second->name();
-
-      // Add the control dependencies needed to delay the execution of the swap.
-      out_trigger->add_input(strings::StrCat("^", swap_nodes.first->name()));
-      swap_nodes.second->add_input(strings::StrCat("^", in_trigger->name()));
-
-      // Make sure we won't try to swap the swap nodes in subsequent passes.
-      skip_list->insert(swap_nodes.first->name());
-      skip_list->insert(swap_nodes.second->name());
+    for (auto &fanin : new_view.GetFanins(*node_def, true)) {
+      LOG(INFO) << __func__ << " fanin = " << fanin.node->name()
+                << " device = " << fanin.node->device()
+                << " priority = " << fanin.node->priority();
     }
   }
-  LOG(INFO) << __func__ << " updated_graph = " << updated_graph;
-  return updated_graph;
-}
+ return true;
+ } */
 
 // TODO(rmlarsen): Add distributed TF test.
 Status RelaxAllocatorConstraints(GraphDef* optimized_graph) {
@@ -1365,7 +1108,6 @@ Status RelaxAllocatorConstraints(GraphDef* optimized_graph) {
 
 Status MemoryOptimizer::Optimize(Cluster* cluster, const GrapplerItem& item,
                                  GraphDef* optimized_graph) {
-  LOG(INFO) << __func__ << " from MemoryOptimizer";
   *optimized_graph = item.graph;
 
   RecomputationRewritingPass(optimization_level_,
@@ -1373,29 +1115,22 @@ Status MemoryOptimizer::Optimize(Cluster* cluster, const GrapplerItem& item,
                              item);
 
   GrapplerItem optimized_item(item, optimized_graph);
-  std::unordered_set<string> skip_list;
   // Bound the number of rewrite passes to avoid long processing times on graphs
   // that simply won't fit in memory.
-  bool updated_graph = true;
-  for (int i = 0; i < 25 && updated_graph; ++i) {
-    updated_graph = false;
-    if ((optimization_level_ == RewriterConfig::DEFAULT_MEM_OPT ||
-         optimization_level_ == RewriterConfig::SCHEDULING_HEURISTICS ||
-         optimization_level_ == RewriterConfig::HEURISTICS) &&
-        cluster != nullptr) {
-      updated_graph |= SchedulingPass(cluster, &optimized_item);
-    }
+  if ((optimization_level_ == RewriterConfig::DEFAULT_MEM_OPT ||
+       optimization_level_ == RewriterConfig::SCHEDULING_HEURISTICS ||
+       optimization_level_ == RewriterConfig::HEURISTICS) &&
+      cluster != nullptr) {
+    SchedulingPass(cluster, &optimized_item);
+  }
 
-    if ((optimization_level_ == RewriterConfig::DEFAULT_MEM_OPT ||
-         optimization_level_ == RewriterConfig::SWAPPING_HEURISTICS ||
-         optimization_level_ == RewriterConfig::HEURISTICS ||
-         optimization_level_ == RewriterConfig::MANUAL) &&
-        cluster != nullptr) {
-      LOG(INFO) << __func__ << " swapping_pass, i = "
-                << i;
-      updated_graph |= SwappingPass(optimization_level_, cluster,
-                                    &optimized_item, &skip_list);
-    }
+  if ((optimization_level_ == RewriterConfig::DEFAULT_MEM_OPT ||
+       optimization_level_ == RewriterConfig::SWAPPING_HEURISTICS ||
+       optimization_level_ == RewriterConfig::HEURISTICS ||
+       optimization_level_ == RewriterConfig::MANUAL) &&
+      cluster != nullptr) {
+    //SwappingPass(optimization_level_, cluster,
+    //             &optimized_item);
   }
 
   TF_RETURN_IF_ERROR(RelaxAllocatorConstraints(&optimized_item.graph));

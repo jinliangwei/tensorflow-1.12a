@@ -100,6 +100,8 @@ class NodeBuilder {
   // "assigned device" in the Node).
   NodeBuilder& Device(StringPiece device_spec);
 
+  NodeBuilder& Priority(int32 priority);
+
   // Sets the device name in the "assigned device" field in tensorflow::Node.
   NodeBuilder& AssignedDevice(StringPiece device);
 

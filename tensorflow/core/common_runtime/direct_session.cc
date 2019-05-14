@@ -67,6 +67,7 @@ limitations under the License.
 #include "tensorflow/core/platform/types.h"
 #include "tensorflow/core/util/device_name_utils.h"
 #include "tensorflow/core/util/env_var.h"
+#include "tensorflow/core/platform/stacktrace.h"
 
 namespace tensorflow {
 
@@ -627,6 +628,7 @@ Status DirectSession::RunInternal(int64 step_id, const RunOptions& run_options,
     //     less threads to the main compute pool by default.
     thread::ThreadPool* device_thread_pool =
         item.device->tensorflow_device_thread_pool();
+
     // TODO(crk): Investigate usage of RunHandlerPool when using device specific
     // thread pool(s).
     if (!device_thread_pool) {
@@ -1289,7 +1291,6 @@ Status DirectSession::CreateExecutors(
     item->executor = nullptr;
     item->device = device;
     auto executor_type = options_.config.experimental().executor_type();
-    LOG(INFO) << __func__ << " executor_type = " << executor_type;
     TF_RETURN_IF_ERROR(NewExecutor(
         executor_type, params, std::move(partition_graph), &item->executor));
   }
@@ -1385,7 +1386,6 @@ Status DirectSession::GetOrCreateExecutors(
       str_util::Join(inputs_sorted, ","), "->",
       str_util::Join(outputs_sorted, ","), "/", str_util::Join(tn_sorted, ","),
       "/", run_state_args->is_partial_run, "/", debug_tensor_watches_summary);
-  LOG(INFO) << __func__ << " sorted_key = " << sorted_key;
   // Set the handle, if its needed to log memory or for partial run.
   if (handle_name_counter_value >= 0) {
     run_state_args->handle =

@@ -1251,7 +1251,6 @@ Status ConstantFolding::FoldGraph(GraphDef* output) {
     if (fanout.empty()) nodes_to_delete.push_back(i);
   }
   EraseNodesFromGraph(std::move(nodes_to_delete), output);
-
   for (const auto& node : graph_->node()) {
     // If no fetch nodes is provided, we conservatively
     // keep all nodes in the original graph in case users need to fetch

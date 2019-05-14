@@ -23,6 +23,7 @@ limitations under the License.
 #include "tensorflow/core/lib/random/random.h"
 #include "tensorflow/core/platform/notification.h"
 #include "tensorflow/core/util/ptr_util.h"
+#include "tensorflow/core/platform/stacktrace.h"
 
 namespace tensorflow {
 namespace data {

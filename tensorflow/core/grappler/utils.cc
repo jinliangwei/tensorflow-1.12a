@@ -357,6 +357,8 @@ void EraseNodesFromGraphImpl(const UniqueContainer& nodes_to_delete,
   int last = graph->node_size() - 1;
   for (auto it = nodes_to_delete.rbegin(); it != nodes_to_delete.rend(); ++it) {
     const int index = *it;
+    //LOG(INFO) << __func__ << " erase " << index
+    //          << " name = " << graph->node(index).name();
     graph->mutable_node()->SwapElements(index, last);
     last--;
   }

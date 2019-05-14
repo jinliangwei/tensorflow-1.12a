@@ -60,4 +60,6 @@ message NodeDef {
   // attr's type field.
   // TODO(josh11b): Add some examples here showing best practices.
   map<string, AttrValue> attr = 5;
+
+  int32 priority = 6;
 };

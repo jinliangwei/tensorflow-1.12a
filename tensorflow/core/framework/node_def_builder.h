@@ -86,6 +86,8 @@ class NodeDefBuilder {
   // Constrains what devices this node may be scheduled on.
   NodeDefBuilder& Device(StringPiece device_spec);
 
+  NodeDefBuilder& Priority(int32 priority);
+
   // Sets the attr, if not already set.  If already set with a different
   // value, an error will be returned from Finalize().
   NodeDefBuilder& Attr(StringPiece name, const AttrValue& value);

@@ -245,6 +245,21 @@ class ColocationGraph {
     Member& new_root_member = members_[new_root];
     Member& old_root_member = members_[old_root];
 
+    if ((new_root_member.subtree_contains_variable != old_root_member.subtree_contains_variable)
+        && DeviceNameUtils::HasSomeDetails(new_root_member.device_name) &&
+        DeviceNameUtils::HasSomeDetails(old_root_member.device_name)) {
+      if (!DeviceNameUtils::AreCompatibleDevNames(new_root_member.device_name,
+                                                  old_root_member.device_name)) {
+        if (new_root_member.subtree_contains_variable) {
+          old_root_member.device_name = new_root_member.device_name;
+        } else {
+          new_root_member.device_name = old_root_member.device_name;
+        }
+      }
+    }
+
+    new_root_member.subtree_contains_variable |= old_root_member.subtree_contains_variable;
+
     // Merge the partial device specifications, and ensure that they are
     // compatible. NULL options_ is treated as allowing soft placement.
     // TODO(mrry): Consider enriching the error message by pointing
@@ -439,6 +454,10 @@ class ColocationGraph {
     // sets.
     int rank = 0;
 
+    // the subtree rooted at this node contains
+    // at least one variable
+    bool subtree_contains_variable = false;
+
     // The intersection of all device types supported by this node,
     // and those of all of its children, in priority order
     // of the preferred device.
@@ -509,6 +528,8 @@ class ColocationGraph {
     const int id = node.id();
     DCHECK_GE(id, 0);
     member->parent = id;
+    member->subtree_contains_variable
+        = node.IsVariable() || (node.type_string() == "VarHandleOp");
     TF_RETURN_IF_ERROR(SupportedDeviceTypesForNode(
         device_types_, node.def(), &member->supported_device_types));
 
@@ -748,17 +769,6 @@ Status Placer::Run() {
           TF_RETURN_IF_ERROR(
               colocation_graph.VerifyResourceAndRefInputsCanBeColocated(
                   dst, src, source_parsed_name));
-          if (log_device_placement_) {
-            LOG(INFO) << "Ignoring device specification "
-                      << DeviceNameUtils::ParsedNameToString(dest_parsed_name)
-                      << " for node '" << dst->name()
-                      << "' because the input edge from '" << src->name()
-                      << "' is a reference connection and already has a device "
-                         "field set to "
-                      << DeviceNameUtils::ParsedNameToString(
-                             source_parsed_name);
-          }
-
           // Make 'dst' colocated with the source
           dst_root.device_name = source_parsed_name;
         } else {

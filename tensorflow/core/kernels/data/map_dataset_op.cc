@@ -139,6 +139,8 @@ class MapDatasetOp : public UnaryDatasetOpKernel {
           return Status::OK();
         }
 
+        LOG(INFO) << __func__ << " map_dataset_op calling CapturedFunction::Run";
+
         // TODO(mrry): Avoid blocking a threadpool thread. We will need to
         // stack-rip the iterators and use async kernels.
         Status s =

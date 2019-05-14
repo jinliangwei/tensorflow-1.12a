@@ -112,6 +112,7 @@ message RewriterConfig {
     // Scheduling will split big ops such as AddN and try to enforce a schedule
     // of the new computations that decreases peak memory usage.
     SCHEDULING_HEURISTICS = 6;
+
     // Use any combination of swapping and recomputation heuristics.
     HEURISTICS = 3;
   }
@@ -119,6 +120,7 @@ message RewriterConfig {
   // effect on manually requested memory optimization passes in the optimizers
   // field.
   MemOptType memory_optimization = 4;
+
   // A node name scope for node names which are valid outputs of recompuations.
   // Inputs to nodes that match this scope may be recomputed (subject either to
   // manual annotation of those input nodes or to manual annotation and

@@ -85,6 +85,7 @@ struct RecvInfo {
   NodeDef* recv;
   NodeDef* real_recv;
   int64 start_time;
+  NodeDef* send;
 };
 
 typedef std::unordered_map<DupRecvKey, RecvInfo, DupRecvKeyHash, DupRecvKeyEq>
@@ -194,6 +195,7 @@ NodeDef* AddSend(const PartitionOptions& opts, const GraphInfo& g_info,
   const DataType dtype = send_from.data_type;
   const DataType cast_dtype = opts.should_cast ? opts.should_cast(edge) : dtype;
   const Node* src = edge->src();
+  const Node* dst = edge->dst();
   const int src_port = edge->src_output();
 
   // host_memory = true iff we need to use HostSend/HostCast.
@@ -235,6 +237,8 @@ NodeDef* AddSend(const PartitionOptions& opts, const GraphInfo& g_info,
   NodeDefBuilder send_builder(opts.new_name(src->name()), send_op);
   SetSendRecvAttrs(opts, edge, &send_builder);
   send_builder.Device(src->assigned_device_name()).Input(send_from);
+  send_builder.Priority(std::max(src->def().priority(),
+                                 dst->def().priority() - 1));
   if (opts.scheduling_for_recvs) {
     send_builder.Attr("_start_time", start_time);
   }
@@ -271,8 +275,11 @@ NodeDef* AddRecv(const PartitionOptions& opts, const GraphInfo& g_info,
   SetSendRecvAttrs(opts, edge, &recv_builder);
   recv_builder.Device(dst->assigned_device_name())
       .Attr("tensor_type", cast_dtype);
+  recv_builder.Priority(std::max(src->def().priority(),
+                                 dst->def().priority() - 1));
   NodeDef* recv = gdef->add_node();
   *status = recv_builder.Finalize(recv);
+
   if (!status->ok()) return nullptr;
   *real_recv = recv;
 
@@ -1076,6 +1083,16 @@ Status Partition(const PartitionOptions& opts, Graph* g,
         } else {
           AddInput(dst_def, recv_node_name, 0);
         }
+
+        NodeDef* recv_node = iter->second.real_recv;
+        int32 src_priority = src->def().priority();
+        int32 dst_priority = dst_def->priority();
+        recv_node->set_priority(std::max(src_priority,
+                                         std::min(dst_priority,
+                                                  recv_node->priority())));
+        NodeDef* send_node = iter->second.send;
+        send_node->set_priority(recv_node->priority());
+
         ref_control_inputs.push_back(recv_node_name);
 
         // We want the start_time for the recv to be the smallest of the start
@@ -1145,7 +1162,7 @@ Status Partition(const PartitionOptions& opts, Graph* g,
         // Memorize the send/recv pair, only if this is not a "ref" edge.
         // NOTE(yuanbyu): Collapsing ref edges requires extreme care so
         // for now we don't do it.
-        dup_recv[key] = {recv, real_recv, recv_start_time};
+        dup_recv[key] = {recv, real_recv, recv_start_time, send};
         ref_control_inputs.push_back(recv->name());
       }
 

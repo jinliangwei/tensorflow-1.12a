@@ -402,6 +402,7 @@ Status GraphExecutionState::PruneGraph(
   feed_rewrites.reserve(options.callable_options.feed_size());
   std::vector<std::unique_ptr<subgraph::PruneRewrite>> fetch_rewrites;
   fetch_rewrites.reserve(options.callable_options.fetch_size());
+
   if (options.use_function_convention) {
     std::vector<TensorAndDevice> tensors_and_devices;
     for (int i = 0; i < options.callable_options.feed_size(); ++i) {
@@ -603,6 +604,9 @@ Status GraphExecutionState::OptimizeGraph(
         }
         if (node.attr().count("dtype") == 0 ||
             node.attr().count("shape") == 0) {
+          LOG(INFO) << __func__ << " node = " << node.name()
+                    << " num_nodes = " << original_graph_def_.node_size()
+                    << " missing node shape or type";
           return errors::InvalidArgument("Missing node shape or type");
         }
         TensorShapeProto shape_proto(node.attr().at("shape").shape());
@@ -636,6 +640,7 @@ Status GraphExecutionState::OptimizeGraph(
     }
     grappler::VirtualCluster cluster(device_set_);
     GraphDef new_graph;
+    LOG(INFO) << __func__ << " RunMetaOptimizer";
     TF_RETURN_IF_ERROR(grappler::RunMetaOptimizer(
         item, rewrite_options, cpu_device, &cluster, &new_graph));
 
@@ -696,6 +701,7 @@ Status GraphExecutionState::BuildGraph(const BuildGraphOptions& options,
 
   Status s = OptimizeGraph(options, &optimized_graph, &optimized_flib);
   if (!s.ok()) {
+    LOG(INFO) << "Grappler optimization failed. Error: " << s.error_message();
     VLOG(2) << "Grappler optimization failed. Error: " << s.error_message();
     // Simply copy the original graph and the function library if we couldn't
     // optimize it.

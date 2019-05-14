@@ -370,6 +370,7 @@ class MapAndBatchDatasetOp : public UnaryDatasetOpKernel {
                                    std::vector<Tensor> input_element) {
               std::shared_ptr<std::vector<Tensor>> return_values(
                   new std::vector<Tensor>());
+              LOG(INFO) << __func__ << " map_and_batch_dataset_op calling CapturedFunction::RunAsync";
               dataset()->captured_func_->RunAsync(
                   ctx.get(), std::move(input_element), return_values.get(),
                   [this, ctx, result, return_values, offset](Status status) {
