@@ -104,7 +104,7 @@ static bool IsSwappable(GraphView::InputPort input) {
 void PartitionGraph(GraphDef* graph,
                     const std::unordered_map<string, DeviceProperties> &devices,
                     std::unordered_map<int32, std::vector<NodeDef*>> *node_partitions) {
-  const size_t kPartitionSize = 10;
+  const size_t kPartitionSize = 20;
 
   SimpleGraphView graph_view;
   CHECK(graph_view.Initialize(*graph).ok());
@@ -358,25 +358,25 @@ bool SwappingPass(RewriterConfig::MemOptType optimization_level,
                 &item->graph);
   }
 
-  //GraphView new_view(&item->graph);
-  //for (const auto &node : item->graph.node()) {
-    //NodeDef* node_def = new_view.GetNode(node.name());
-    //LOG(INFO) << __func__ << " node = " << node_def->name()
-        //    << " num_inputs = " << node_def->input_size()
-        //    << " device = " << node_def->device()
-        //    << "  op_type = " << node_def->op()
-        //        << " priority = " << node_def->priority();
-    //for (auto &fanout : new_view.GetFanouts(*node_def, true)) {
-      //LOG(INFO) << __func__ << " fanout = " << fanout.node->name()
-          //    << " device = " << fanout.node->device()
-          //        << " priority = " << fanout.node->priority();
-      //}
-    //for (auto &fanin : new_view.GetFanins(*node_def, true)) {
-      //LOG(INFO) << __func__ << " fanin = " << fanin.node->name()
-          //    << " device = " << fanin.node->device()
-          //<< " priority = " << fanin.node->priority();
-      //}
-    //}
+  GraphView new_view(&item->graph);
+  for (const auto &node : item->graph.node()) {
+    NodeDef* node_def = new_view.GetNode(node.name());
+    LOG(INFO) << __func__ << " node = " << node_def->name()
+            << " num_inputs = " << node_def->input_size()
+            << " device = " << node_def->device()
+            << "  op_type = " << node_def->op()
+              << " priority = " << node_def->priority();
+    for (auto &fanout : new_view.GetFanouts(*node_def, true)) {
+      LOG(INFO) << __func__ << " fanout = " << fanout.node->name()
+              << " device = " << fanout.node->device()
+                << " priority = " << fanout.node->priority();
+      }
+    for (auto &fanin : new_view.GetFanins(*node_def, true)) {
+      LOG(INFO) << __func__ << " fanin = " << fanin.node->name()
+              << " device = " << fanin.node->device()
+          << " priority = " << fanin.node->priority();
+      }
+    }
  return true;
 }
 

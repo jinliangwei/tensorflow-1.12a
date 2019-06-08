@@ -157,6 +157,44 @@ bool GetConcatAxis(const GraphProperties& properties, NodeDef* node,
   return true;
 }
 
+void PlaceNodeOnCPU(NodeDef* node) {
+  /*  auto iter = node->attr().find("value");
+  if (iter == node->attr().end()) {
+      LOG(INFO) << __func__
+                << " do not place " << node->name()
+                << " on CPU because value field is missing";
+    return;
+  }
+  AttrValue attr_tensor = iter->second;
+  size_t val_size = attr_tensor.tensor().tensor_content().size();
+  if (val_size < 1 * 1024 * 1024) {
+    LOG(INFO) << __func__
+              << " do not place " << node->name()
+              << " on CPU because value size is too small, val_size = "
+              << val_size;
+    return;
+    } */
+  LOG(INFO) << __func__ << node->name()
+            << " type: " << node->op()
+            << " IsConstant: " << true;
+
+  if (!node->device().empty()) {
+    const auto &device = node->device();
+    DeviceNameUtils::ParsedName parsed_device_name;
+    DeviceNameUtils::ParseFullName(device, &parsed_device_name);
+    parsed_device_name.type = "CPU";
+    parsed_device_name.has_type = true;
+    auto new_device = DeviceNameUtils::ParsedNameToString(parsed_device_name);
+    node->set_device(new_device);
+  } else {
+    DeviceNameUtils::ParsedName parsed_device_name;
+    parsed_device_name.type = "CPU";
+    parsed_device_name.has_type = true;
+    auto new_device = DeviceNameUtils::ParsedNameToString(parsed_device_name);
+    node->set_device(new_device);
+  }
+}
+
 }  // namespace
 
 ConstantFolding::ConstantFolding(RewriterConfig::Toggle opt_level,
@@ -1136,6 +1174,11 @@ Status ConstantFolding::FoldNode(NodeDef* node, GraphDef* output_graph) {
     // create new nodes otherwise.
     if (const_nodes.size() == 1) {
       node->set_op("Const");
+      PlaceNodeOnCPU(node);
+      LOG(INFO) << __func__ << " ConstantFolding "
+                << " rewrite node (single output) " << node->name()
+                << " device = " << node->device();
+
       // Note we need to clear the inputs in NodeMap before we clear the inputs
       // in the node, otherwise NodeMap would see empty inputs and effectively
       // does nothing.
@@ -1156,7 +1199,11 @@ Status ConstantFolding::FoldNode(NodeDef* node, GraphDef* output_graph) {
       NodeDef* added_node = output_graph->add_node();
       *added_node = *const_node;
       added_node->set_device(node->device());
+      PlaceNodeOnCPU(added_node);
       node_map_->AddNode(added_node->name(), added_node);
+      LOG(INFO) << __func__ << " ConstantFolding "
+                << " added constant node " << added_node->name()
+                << " device = " << added_node->device();
       for (const auto& input : added_node->input()) {
         node_map_->AddOutput(NodeName(input), added_node->name());
       }

@@ -682,18 +682,18 @@ Status ExecutorImpl::Initialize() {
   num_nodes_per_partition_.resize(max_priority + 1, 0);
   for (const Node* n : graph_->nodes()) {
     num_nodes_per_partition_[n->def().priority()] += 1;
-    //LOG(INFO) << __func__ << " "
-    //          << (void*) this
-    //          << " node = " << n->name()
-    //          << " op = " << n->type_string()
-    //          << " priority = " << n->def().priority()
-    //          << " num_nodes_per_partition = "
-    //          << num_nodes_per_partition_[n->def().priority()]
-    //          << " device = " << n->def().device();
-    //for (const auto &input : n->def().input()) {
-    //  LOG(INFO) << __func__ << " "
-    //            << " input = " << input;
-    //}
+    LOG(INFO) << __func__ << " "
+              << (void*) this
+              << " node = " << n->name()
+              << " op = " << n->type_string()
+              << " priority = " << n->def().priority()
+              << " num_nodes_per_partition = "
+              << num_nodes_per_partition_[n->def().priority()]
+              << " device = " << n->def().device();
+    for (const auto &input : n->def().input()) {
+      LOG(INFO) << __func__ << " "
+                << " input = " << input;
+    }
   }
 
   return gview_.SetAllocAttrs(graph_.get(), params_.device);
