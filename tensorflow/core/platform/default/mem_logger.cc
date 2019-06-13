@@ -15,6 +15,7 @@ const char* MemLogger::kAllocTypeTemporary = "Temporary";
 const char* MemLogger::kAllocTypeOutput = "Output";
 const char* MemLogger::kAllocTypeCopy = "Copy";
 const char* MemLogger::kAllocTypeRecvCopy = "RecvCopy";
+const char* MemLogger::kAllocTypeRecvCopySrc = "RecvCopySrc";
 const char* MemLogger::kAllocTypeInitScratchBuffers = "InitScratchBuffers";
 
 thread_local std::string MemLogger::op_name_ = "unknown";
@@ -117,6 +118,8 @@ const char *MemLogger::AllocTypeToString(AllocType alloc_type) {
       return kAllocTypeCopy;
     case AllocType::kRecvCopy:
       return kAllocTypeRecvCopy;
+    case AllocType::kRecvCopySrc:
+      return kAllocTypeRecvCopySrc;
     case AllocType::kInitScratchBuffers:
       return kAllocTypeInitScratchBuffers;
     default:

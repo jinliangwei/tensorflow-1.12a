@@ -119,7 +119,7 @@ void PartitionGraph(GraphDef* graph,
 
   std::vector<std::stack<int>> per_device_ready_nodes(num_devices);
   std::vector<int> num_ready_inputs(graph_view.num_nodes(), 0);
-
+  //std::vector<int> rank(graph_view.num_nodes(), 0);
   for (int i = 0; i < graph_view.num_nodes(); i++) {
     if (graph_view.inputs(i).empty()) {
       const string &device_name = graph_view.node(i).device();

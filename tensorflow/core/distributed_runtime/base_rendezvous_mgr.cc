@@ -269,13 +269,15 @@ void BaseRemoteRendezvous::SameWorkerRecvDone(
   attr.set_gpu_compatible(send_args.alloc_attrs.gpu_compatible() ||
                           recv_args.alloc_attrs.gpu_compatible());
   Allocator* out_allocator = dst_device->GetAllocator(attr);
-  out_allocator->SetAllocationInfo(internal::MemLogger::AllocType::kRecvCopy);
+  out_allocator->SetAllocationInfo(internal::MemLogger::AllocType::kRecvCopySrc);
+  out_allocator->SetOperationInfo(parsed.FullKey().data(), std::string("Unknown"));
   if (in.dtype() != DT_VARIANT) {
     // Variants are handled by CopyTensor::ViaDMA.
     Tensor copy(out_allocator, in.dtype(), in.shape());
     *out = copy;
   }
   out_allocator->ResetAllocationInfo();
+  out_allocator->ResetOperationInfo();
   // The following function takes care of cpu->gpu, gpu->cpu, gpu->gpu copies,
   // etc.
   AllocatorAttributes host_alloc_attrs;
@@ -283,14 +285,20 @@ void BaseRemoteRendezvous::SameWorkerRecvDone(
   host_alloc_attrs.set_on_host(true);
   src_device->GetAllocator(host_alloc_attrs)->SetAllocationInfo(
       internal::MemLogger::AllocType::kRecvCopy);
+  src_device->GetAllocator(host_alloc_attrs)->SetOperationInfo(
+      parsed.FullKey().data(), std::string("Unknown"));
   dst_device->GetAllocator(recv_args.alloc_attrs)->SetAllocationInfo(
       internal::MemLogger::AllocType::kRecvCopy);
+  dst_device->GetAllocator(recv_args.alloc_attrs)->SetOperationInfo(
+      parsed.FullKey().data(), std::string("Unknown"));
   CopyTensor::ViaDMA(parsed.edge_name, send_args.device_context,
                      recv_args.device_context, src_device, dst_device,
                      send_args.alloc_attrs, recv_args.alloc_attrs, &in, out,
                      0 /*dev_to_dev_stream_index*/, std::move(done));
   src_device->GetAllocator(host_alloc_attrs)->ResetAllocationInfo();
+  src_device->GetAllocator(host_alloc_attrs)->ResetOperationInfo();
   dst_device->GetAllocator(recv_args.alloc_attrs)->ResetAllocationInfo();
+  dst_device->GetAllocator(recv_args.alloc_attrs)->ResetOperationInfo();
 }
 
 bool BaseRemoteRendezvous::IsSameWorker(DeviceNameUtils::ParsedName src,

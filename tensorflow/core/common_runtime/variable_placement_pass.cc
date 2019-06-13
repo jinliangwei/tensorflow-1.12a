@@ -8,27 +8,44 @@ namespace tensorflow {
 namespace {
 
 void PlaceNodeOnCPU(Node* node) {
-  /*  if (node->IsConstant()) {
-    const NodeDef& def = node->def();
-    auto iter = def.attr().find("value");
-    if (iter == def.attr().end()) {
-      LOG(INFO) << __func__
-                << " do not place " << node->name()
-                << " on CPU because value field is missing";
-      return;
-    }
+  const NodeDef& def = node->def();
+  auto iter = def.attr().find("value");
+  if (iter != def.attr().end()) {
     AttrValue attr_tensor = iter->second;
-    size_t val_size = attr_tensor.tensor().tensor_content().size();
-    if (val_size < 1 * 1024 * 1024) {
+    size_t num_elements = 1;
+    TensorShapeProto tensor_shape = attr_tensor.tensor().tensor_shape();
+
+    for (auto dim : tensor_shape.dim()) {
+      num_elements *= dim.size();
+    }
+    if (num_elements < 1024) {
       LOG(INFO) << __func__
                 << " do not place " << node->name()
-                << " on CPU because value size is too small, val_size = "
-                << val_size;
+                << " on CPU because number of elements is too small, num_elements = "
+                << num_elements;
       return;
     }
-    }*/
+  } else {
+    iter = def.attr().find("shape");
+    if (iter != def.attr().end()) {
+      TensorShapeProto tensor_shape = iter->second.shape();
+      size_t num_elements = 1;
 
-  LOG(INFO) << __func__ << node->name()
+      for (auto dim : tensor_shape.dim()) {
+        num_elements *= dim.size();
+      }
+
+      if (num_elements < 1024) {
+        LOG(INFO) << __func__
+                  << " do not place " << node->name()
+                  << " on CPU because number of elements is too small, num_elements = "
+                  << num_elements;
+        return;
+      }
+    }
+  }
+
+  LOG(INFO) << __func__ << " " << node->name()
             << " type: " << node->type_string()
             << " IsConstant: " << node->IsConstant();
 
