@@ -28,12 +28,9 @@ namespace grappler {
 // Kahn's algorithm is implemented.
 // For details, see https://en.wikipedia.org/wiki/Topological_sorting
 Status ComputeTopologicalOrder(
-    const GraphDef& graph, std::vector<int>* ready_nodes,
+    const SimpleGraphView& graph_view, std::vector<int>* ready_nodes,
     const std::vector<std::pair<const NodeDef*, const NodeDef*>>*
         extra_dependencies) {
-  SimpleGraphView graph_view;
-  TF_RETURN_IF_ERROR(graph_view.Initialize(graph, extra_dependencies));
-
   ready_nodes->reserve(graph_view.num_nodes());
 
   int front = 0;
@@ -44,9 +41,9 @@ Status ComputeTopologicalOrder(
       ready_nodes->push_back(i);
       back++;
     }
-    if (IsMerge(graph.node(i))) {
+    if (IsMerge(graph_view.node(i))) {
       for (int input : graph_view.inputs(i)) {
-        if (IsNextIteration(graph.node(input))) {
+        if (IsNextIteration(graph_view.node(input))) {
           num_ready_inputs[i]++;
         }
       }
@@ -73,6 +70,16 @@ Status ComputeTopologicalOrder(
         "The graph couldn't be sorted in topological order.");
   }
   return Status::OK();
+}
+
+Status ComputeTopologicalOrder(
+    const GraphDef& graph, std::vector<int>* ready_nodes,
+    const std::vector<std::pair<const NodeDef*, const NodeDef*>>*
+        extra_dependencies) {
+  SimpleGraphView graph_view;
+  TF_RETURN_IF_ERROR(graph_view.Initialize(graph, extra_dependencies));
+
+  return ComputeTopologicalOrder(graph_view, ready_nodes, extra_dependencies);
 }
 
 Status ComputeTopologicalOrder(

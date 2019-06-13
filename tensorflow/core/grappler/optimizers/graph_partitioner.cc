@@ -110,21 +110,34 @@ void PartitionGraph(GraphDef* graph,
   CHECK(graph_view.Initialize(*graph).ok());
 
   size_t num_devices = devices.size();
-  std::vector<int> per_device_num_ops_curr_partition(num_devices, 0);
   std::unordered_map<string, int> device_name_to_index_map;
   int i = 0;
   for (const auto &device_pair : devices) {
     device_name_to_index_map[device_pair.first] = i++;
   }
 
-  std::vector<std::stack<int>> per_device_ready_nodes(num_devices);
+  std::vector<int> topo_order;
+  ComputeTopologicalOrder(graph_view, &topo_order, nullptr);
+  std::vector<int> rank(graph_view.num_nodes(), 0);
+  for (int i = topo_order.size() - 1; i >= 0; i--) {
+    int node_id = topo_order[i];
+    int node_rank = rank[node_id];
+    for (auto input_node : graph_view.inputs(node_id)) {
+      rank[input_node] = std::max(rank[input_node], node_rank + 1);
+    }
+  }
+
+  using RankOrderedReadyQueue = std::priority_queue<int, std::vector<int>,
+                                                    std::function<bool(int,int)>>;
+  RankOrderedReadyQueue ready_queue([&](int a, int b) { return rank[a] < rank[b]; });
+
+  std::vector<int> per_device_partition_num(num_devices, 1);
+  std::vector<int> per_device_num_nodes_curr_partition(num_devices, 0);
   std::vector<int> num_ready_inputs(graph_view.num_nodes(), 0);
-  //std::vector<int> rank(graph_view.num_nodes(), 0);
+
   for (int i = 0; i < graph_view.num_nodes(); i++) {
     if (graph_view.inputs(i).empty()) {
-      const string &device_name = graph_view.node(i).device();
-      int32 device_index = device_name_to_index_map[device_name];
-      per_device_ready_nodes[device_index].push(i);
+      ready_queue.emplace(i);
     }
 
     if (IsMerge(graph_view.node(i))) {
@@ -136,38 +149,71 @@ void PartitionGraph(GraphDef* graph,
     }
   }
 
-  int32 partition_id = 1;
-  bool executed_all = false;
-  while (!executed_all) {
-    executed_all = true;
-    for (int dev_index = 0; dev_index < per_device_ready_nodes.size();
-         dev_index++) {
-      if (per_device_num_ops_curr_partition[dev_index] == kPartitionSize) {
-        partition_id++;
-        for (auto& num_ops : per_device_num_ops_curr_partition) num_ops = 0;
+  size_t num_nodes_executed = 0;
+  std::vector<RankOrderedReadyQueue> per_device_ready_queue(num_devices,
+                                                            RankOrderedReadyQueue([&](int a, int b) { return rank[a] < rank[b]; })
+                                                            );
+  std::unordered_map<int, int> last_input_partition;
+  int ready_node = -1;
+  while (!ready_queue.empty() || ready_node != -1) {
+    int node_id = ready_node;
+    if (node_id == -1) {
+      node_id = ready_queue.top();
+      ready_queue.pop();
+    }
+    ready_node = -1;
+    num_nodes_executed++;
+
+    const string &device = graph_view.node(node_id).device();
+    int device_index = device_name_to_index_map[device];
+    per_device_num_nodes_curr_partition[device_index]++;
+
+    int partition_id = per_device_partition_num[device_index];
+    NodeDef* node = graph->mutable_node(node_id);
+    node->set_priority(partition_id);
+    (*node_partitions)[partition_id].emplace_back(node);
+
+    if (per_device_num_nodes_curr_partition[device_index] == kPartitionSize) {
+      per_device_partition_num[device_index]++;
+      per_device_num_nodes_curr_partition[device_index] = 0;
+      int new_partition_id = per_device_partition_num[device_index];
+      std::vector<int> buff;
+      while (!per_device_ready_queue[device_index].empty()) {
+        int device_ready_node = per_device_ready_queue[device_index].top();
+        per_device_ready_queue[device_index].pop();
+        if (last_input_partition[device_ready_node] <= new_partition_id - 2 &&
+            buff.size() < kPartitionSize) {
+          ready_queue.emplace(device_ready_node);
+        } else {
+          buff.emplace_back(device_ready_node);
+        }
       }
-      auto &ready_node_stack = per_device_ready_nodes[dev_index];
-      if (!ready_node_stack.empty()) {
-        int ready_node = ready_node_stack.top();
-        ready_node_stack.pop();
-        executed_all = false;
-        NodeDef* node = graph->mutable_node(ready_node);
-        node->set_priority(partition_id);
-        (*node_partitions)[partition_id].emplace_back(node);
-        per_device_num_ops_curr_partition[dev_index] += 1;
+      for (int n : buff) {
+        per_device_ready_queue[device_index].emplace(n);
+      }
+    }
 
-        for (int fanout : graph_view.outputs(ready_node)) {
-          ++num_ready_inputs[fanout];
-
-          if (num_ready_inputs[fanout] == graph_view.inputs(fanout).size()) {
-            const string& fanout_device = graph_view.node(fanout).device();
-            int fanout_device_index = device_name_to_index_map[fanout_device];
-            per_device_ready_nodes[fanout_device_index].push(fanout);
-          }
+    for (int fanout : graph_view.outputs(node_id)) {
+      ++num_ready_inputs[fanout];
+      if (num_ready_inputs[fanout] == graph_view.inputs(fanout).size()) {
+        const string& fanout_device = graph_view.node(fanout).device();
+        int fanout_device_index = device_name_to_index_map[fanout_device];
+        if (fanout_device_index == device_index) {
+          per_device_ready_queue[fanout_device_index].emplace(fanout);
+          last_input_partition[fanout] = partition_id;
+        } else {
+          ready_queue.emplace(fanout);
         }
       }
     }
+
+    if (!per_device_ready_queue[device_index].empty()) {
+      ready_node = per_device_ready_queue[device_index].top();
+      per_device_ready_queue[device_index].pop();
+    }
   }
+
+  CHECK_EQ(num_nodes_executed, graph_view.num_nodes());
 }
 
 void AddSwapNodesForOneNode(GraphDef* graph,

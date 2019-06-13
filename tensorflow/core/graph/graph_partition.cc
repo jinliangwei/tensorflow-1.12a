@@ -237,8 +237,7 @@ NodeDef* AddSend(const PartitionOptions& opts, const GraphInfo& g_info,
   NodeDefBuilder send_builder(opts.new_name(src->name()), send_op);
   SetSendRecvAttrs(opts, edge, &send_builder);
   send_builder.Device(src->assigned_device_name()).Input(send_from);
-  send_builder.Priority(std::max(src->def().priority(),
-                                 dst->def().priority() - 1));
+  send_builder.Priority(src->def().priority());
   if (opts.scheduling_for_recvs) {
     send_builder.Attr("_start_time", start_time);
   }
@@ -275,8 +274,7 @@ NodeDef* AddRecv(const PartitionOptions& opts, const GraphInfo& g_info,
   SetSendRecvAttrs(opts, edge, &recv_builder);
   recv_builder.Device(dst->assigned_device_name())
       .Attr("tensor_type", cast_dtype);
-  recv_builder.Priority(std::max(src->def().priority(),
-                                 dst->def().priority() - 1));
+  recv_builder.Priority(std::max(0, dst->def().priority() - 1));
   NodeDef* recv = gdef->add_node();
   *status = recv_builder.Finalize(recv);
 
