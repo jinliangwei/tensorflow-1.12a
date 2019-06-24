@@ -1,0 +1,4 @@
+This branch contains all memory optimization tricks, including
+1) graph partitioning and scheduling (it might be called "dynamic scheduling" somewhere)
+2) place variables and constants on CPU memory
+3) Do not reuse send and recv pairs
