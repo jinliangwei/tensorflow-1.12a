@@ -1,0 +1,7 @@
+This branch contains all memory reduction tricks. Including
+1) partitioning and scheduling
+  - the graph partitioning strategy
+  -- compute the rank of each node which is the length of the longest path from this node to sink
+  -- prioritize nodes that have higher ranks
+2) place variables and constants on CPU memory
+3) no reusing send/recv pairs
