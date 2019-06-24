@@ -8,7 +8,7 @@ namespace tensorflow {
 namespace {
 
 void PlaceNodeOnCPU(Node* node) {
-  const NodeDef& def = node->def();
+  /*  const NodeDef& def = node->def();
   auto iter = def.attr().find("value");
   if (iter != def.attr().end()) {
     AttrValue attr_tensor = iter->second;
@@ -43,7 +43,7 @@ void PlaceNodeOnCPU(Node* node) {
         return;
       }
     }
-  }
+    } */
 
   LOG(INFO) << __func__ << " " << node->name()
             << " type: " << node->type_string()

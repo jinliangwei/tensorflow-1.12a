@@ -158,7 +158,7 @@ bool GetConcatAxis(const GraphProperties& properties, NodeDef* node,
 }
 
 void PlaceNodeOnCPU(NodeDef* node) {
-  auto iter = node->attr().find("value");
+  /*  auto iter = node->attr().find("value");
   if (iter != node->attr().end()) {
     AttrValue attr_tensor = iter->second;
     size_t num_elements = 1;
@@ -192,7 +192,7 @@ void PlaceNodeOnCPU(NodeDef* node) {
         return;
       }
     }
-  }
+    } */
 
   LOG(INFO) << __func__ << " " << node->name()
             << " type: " << node->op()

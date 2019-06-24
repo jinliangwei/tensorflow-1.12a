@@ -1,0 +1,8 @@
+This branch contains all memory reduction tricks, including
+1) partitioning and scheduling
+  - partitioning strategy
+  -- first, schedule operations that have an input that's computed in the current or the previous iteration
+  -- among them, prioritize the ones that have a higher rank (length of longest path to sink)
+  -- if none is available, schedule the highest ranked node
+2) place variables and constants on CPU memory
+3) do not reuse send/recv pairs
