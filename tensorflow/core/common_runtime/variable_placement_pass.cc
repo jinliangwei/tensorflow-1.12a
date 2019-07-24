@@ -28,9 +28,9 @@ void PlaceNodeOnCPU(Node* node) {
     }
     }*/
 
-  LOG(INFO) << __func__ << node->name()
-            << " type: " << node->type_string()
-            << " IsConstant: " << node->IsConstant();
+  //LOG(INFO) << __func__ << node->name()
+  //          << " type: " << node->type_string()
+  //          << " IsConstant: " << node->IsConstant();
 
   if (!node->requested_device().empty()) {
     const auto &requested_device = node->requested_device();

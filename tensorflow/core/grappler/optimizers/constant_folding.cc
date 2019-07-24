@@ -174,9 +174,9 @@ void PlaceNodeOnCPU(NodeDef* node) {
               << val_size;
     return;
     } */
-  LOG(INFO) << __func__ << node->name()
-            << " type: " << node->op()
-            << " IsConstant: " << true;
+  //LOG(INFO) << __func__ << node->name()
+  //          << " type: " << node->op()
+  //          << " IsConstant: " << true;
 
   if (!node->device().empty()) {
     const auto &device = node->device();
@@ -1175,9 +1175,9 @@ Status ConstantFolding::FoldNode(NodeDef* node, GraphDef* output_graph) {
     if (const_nodes.size() == 1) {
       node->set_op("Const");
       PlaceNodeOnCPU(node);
-      LOG(INFO) << __func__ << " ConstantFolding "
-                << " rewrite node (single output) " << node->name()
-                << " device = " << node->device();
+      //LOG(INFO) << __func__ << " ConstantFolding "
+      //          << " rewrite node (single output) " << node->name()
+      //          << " device = " << node->device();
 
       // Note we need to clear the inputs in NodeMap before we clear the inputs
       // in the node, otherwise NodeMap would see empty inputs and effectively

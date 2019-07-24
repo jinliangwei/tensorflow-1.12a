@@ -359,6 +359,7 @@ bool SwappingPass(RewriterConfig::MemOptType optimization_level,
   }
 
   GraphView new_view(&item->graph);
+  /*
   for (const auto &node : item->graph.node()) {
     NodeDef* node_def = new_view.GetNode(node.name());
     LOG(INFO) << __func__ << " node = " << node_def->name()
@@ -377,6 +378,7 @@ bool SwappingPass(RewriterConfig::MemOptType optimization_level,
           << " priority = " << fanin.node->priority();
       }
     }
+    */
  return true;
 }
 
@@ -393,6 +395,8 @@ Status GraphPartitioner::Optimize(Cluster* cluster, const GrapplerItem& item,
     SwappingPass(optimization_level_, cluster,
                  &optimized_item);
   }
+
+  LOG(INFO) << __func__ << ": GraphPartitioner complete";
 
   optimized_graph->Swap(&optimized_item.graph);
   return Status::OK();
