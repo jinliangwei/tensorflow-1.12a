@@ -1076,6 +1076,7 @@ Status Partition(const PartitionOptions& opts, Graph* g,
       DupRecvKey key{src->id(), edge->src_output(), dst_graph, on_host};
       auto iter = dup_recv.find(key);
       if (false && iter != dup_recv.end()) {
+      //if (iter != dup_recv.end()) {
         // We found one. Reuse the data/control transferred already.
         const string& recv_node_name = iter->second.recv->name();
         if (edge->IsControlEdge()) {

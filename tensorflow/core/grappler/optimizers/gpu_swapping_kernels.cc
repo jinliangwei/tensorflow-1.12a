@@ -161,9 +161,9 @@ class CopyFromHostToGpuAndAssignKernel : public AsyncOpKernel {
   }
 };
 
-REGISTER_KERNEL_BUILDER(
-    Name("_CopyFromHostToGpuAndAssign").Device(DEVICE_GPU).HostMemory("input"),
-    CopyFromHostToGpuAndAssignKernel);
+//REGISTER_KERNEL_BUILDER(
+//    Name("_CopyFromHostToGpuAndAssign").Device(DEVICE_GPU).HostMemory("input"),
+//    CopyFromHostToGpuAndAssignKernel);
 
 }  // namespace
 }  // namespace tensorflow

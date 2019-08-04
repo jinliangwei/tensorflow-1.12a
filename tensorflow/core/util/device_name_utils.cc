@@ -344,21 +344,21 @@ Status DeviceNameUtils::MergeDevNames(ParsedName* target,
   }
 
   if (other.has_type) {
-    if (target->has_type && target->type != other.type) {
-      if (!allow_soft_placement) {
-        return errors::InvalidArgument(
-            "Cannot merge devices with incompatible types: '",
-            ParsedNameToString(*target), "' and '", ParsedNameToString(other),
-            "'");
-      } else {
-        target->has_id = false;
-        target->has_type = false;
-        return Status::OK();
-      }
-    } else {
+    //if (target->has_type && target->type != other.type) {
+    //  if (!allow_soft_placement) {
+    //    return errors::InvalidArgument(
+    //        "Cannot merge devices with incompatible types: '",
+    //        ParsedNameToString(*target), "' and '", ParsedNameToString(other),
+    //        "'");
+    //  } else {
+    //    target->has_id = false;
+    //    target->has_type = false;
+    //    return Status::OK();
+    //  }
+    //} else {
       target->has_type = other.has_type;
       target->type = other.type;
-    }
+      //}
   }
 
   if (other.has_id) {
