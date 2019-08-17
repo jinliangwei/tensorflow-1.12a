@@ -18,9 +18,19 @@ limitations under the License.
 
 #include "tensorflow/core/framework/graph.pb.h"
 #include "tensorflow/core/lib/core/status.h"
+#include "tensorflow/core/grappler/utils.h"
 
 namespace tensorflow {
 namespace grappler {
+  Status ComputeTopologicalOrder(
+      const SimpleGraphView& graph_view, std::vector<int>* ready_nodes,
+      const std::vector<std::pair<const NodeDef*, const NodeDef*>>*
+      extra_dependencies);
+
+  Status ComputeTopologicalOrder(
+      const GraphDef& graph, std::vector<int>* ready_nodes,
+      const std::vector<std::pair<const NodeDef*, const NodeDef*>>*
+      extra_dependencies);
 
 // Compute a topological ordering for the graph nodes.
 Status ComputeTopologicalOrder(

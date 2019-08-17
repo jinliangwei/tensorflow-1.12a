@@ -104,7 +104,7 @@ static bool IsSwappable(GraphView::InputPort input) {
 void PartitionGraph(GraphDef* graph,
                     const std::unordered_map<string, DeviceProperties> &devices,
                     std::unordered_map<int32, std::vector<NodeDef*>> *node_partitions) {
-  const size_t kPartitionSize = 20;
+  const size_t kPartitionSize = 10;
 
   SimpleGraphView graph_view;
   CHECK(graph_view.Initialize(*graph).ok());
@@ -380,18 +380,39 @@ bool SwappingPass(RewriterConfig::MemOptType optimization_level,
  return true;
 }
 
+void
+ComputeAndPrintGraphStats(GrapplerItem* item) {
+  SimpleGraphView graph_view;
+  CHECK(graph_view.Initialize(item->graph).ok());
+  std::vector<int> topo_order;
+  ComputeTopologicalOrder(graph_view, &topo_order, nullptr);
+  std::vector<int> rank(graph_view.num_nodes(), 0);
+  int max_rank = 0;
+  for (int i = 0; i < topo_order.size(); i++) {
+    int node_id = topo_order[i];
+    int node_rank = rank[node_id];
+    for (auto output_node : graph_view.outputs(node_id)) {
+      rank[output_node] = std::max(rank[output_node], node_rank + 1);
+      max_rank = std::max(max_rank, rank[output_node]);
+    }
+  }
+
+  LOG(INFO) << __func__ << " depth = " << max_rank
+            << " num_nodes = " << topo_order.size();
+}
+
 Status GraphPartitioner::Optimize(Cluster* cluster, const GrapplerItem& item,
                                  GraphDef* optimized_graph) {
   *optimized_graph = item.graph;
-
   GrapplerItem optimized_item(item, optimized_graph);
+  ComputeAndPrintGraphStats(&optimized_item);
   if ((optimization_level_ == RewriterConfig::DEFAULT_MEM_OPT ||
        optimization_level_ == RewriterConfig::SWAPPING_HEURISTICS ||
        optimization_level_ == RewriterConfig::HEURISTICS ||
        optimization_level_ == RewriterConfig::MANUAL) &&
       cluster != nullptr) {
     SwappingPass(optimization_level_, cluster,
-                 &optimized_item);
+               &optimized_item);
   }
 
   optimized_graph->Swap(&optimized_item.graph);
