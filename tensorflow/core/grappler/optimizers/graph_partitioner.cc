@@ -388,17 +388,40 @@ ComputeAndPrintGraphStats(GrapplerItem* item) {
   ComputeTopologicalOrder(graph_view, &topo_order, nullptr);
   std::vector<int> rank(graph_view.num_nodes(), 0);
   int max_rank = 0;
+  size_t total_inputs = 0;
+  size_t total_outputs = 0;
   for (int i = 0; i < topo_order.size(); i++) {
     int node_id = topo_order[i];
     int node_rank = rank[node_id];
+    total_inputs += graph_view.inputs(node_id).size();
+    total_outputs += graph_view.outputs(node_id).size();
     for (auto output_node : graph_view.outputs(node_id)) {
       rank[output_node] = std::max(rank[output_node], node_rank + 1);
       max_rank = std::max(max_rank, rank[output_node]);
     }
   }
 
+  size_t total_rank_diff_input = 0;
+  size_t total_rank_diff_output = 0;
+  for (int i = 0; i < topo_order.size(); i++) {
+    int node_id = topo_order[i];
+    int node_rank = rank[node_id];
+
+    for (auto input_node : graph_view.inputs(node_id)) {
+      total_rank_diff_input += node_rank - rank[input_node];
+    }
+
+    for (auto output_node : graph_view.outputs(node_id)) {
+      total_rank_diff_output += rank[output_node] - node_rank;
+    }
+  }
+
   LOG(INFO) << __func__ << " depth = " << max_rank
-            << " num_nodes = " << topo_order.size();
+            << " num_nodes = " << topo_order.size()
+            << " avg_indegree = " << ((float) total_inputs) / ((float) topo_order.size())
+            << " avg_outdegree = " << ((float) total_outputs) / ((float) topo_order.size())
+            << " avg_input_rank_diff = " << ((float) total_rank_diff_input) / ((float) total_inputs)
+            << " avg_output_rank_diff = " << ((float) total_rank_diff_output) / ((float) total_outputs);
 }
 
 Status GraphPartitioner::Optimize(Cluster* cluster, const GrapplerItem& item,
