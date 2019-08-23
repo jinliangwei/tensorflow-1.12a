@@ -184,12 +184,16 @@ void PlaceNodeOnCPU(NodeDef* node) {
     DeviceNameUtils::ParseFullName(device, &parsed_device_name);
     parsed_device_name.type = "CPU";
     parsed_device_name.has_type = true;
+    parsed_device_name.id = 0;
+    parsed_device_name.has_id = true;
     auto new_device = DeviceNameUtils::ParsedNameToString(parsed_device_name);
     node->set_device(new_device);
   } else {
     DeviceNameUtils::ParsedName parsed_device_name;
     parsed_device_name.type = "CPU";
     parsed_device_name.has_type = true;
+    parsed_device_name.id = 0;
+    parsed_device_name.has_id = true;
     auto new_device = DeviceNameUtils::ParsedNameToString(parsed_device_name);
     node->set_device(new_device);
   }
